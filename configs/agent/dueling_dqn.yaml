@@ -1,0 +1,22 @@
+# configs/agent/dueling_dqn.yaml
+
+name: "DuelingDQN"
+algo: "DDRP" # Tên thuật toán trong bài báo
+
+hyperparameters:
+  learning_rate: 0.001   # Alpha 
+  gamma: 0.9             # Discount factor 
+  batch_size: 64
+  buffer_size: 100000    # Replay buffer capacity
+  
+  # Epsilon-Greedy Strategy
+  epsilon_start: 1.0
+  epsilon_end: 0.01
+  epsilon_decay: 0.995
+  
+  # Neural Network Architecture
+  hidden_size: 256       # Số neuron lớp ẩn 
+  target_update_freq: 100 # Cập nhật mạng target sau mỗi 100 steps
+
+  # Discretization (Rời rạc hóa hành động liên tục beta)
+  action_levels: 10      # Chia tài nguyên thành 10 mức {0.1, ..., 1.0}

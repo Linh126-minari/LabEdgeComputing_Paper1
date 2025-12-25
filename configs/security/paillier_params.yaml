@@ -1,0 +1,12 @@
+# configs/security/paillier_params.yaml
+
+encryption:
+  enabled: true          # Bật/tắt tính năng bảo mật để so sánh (Hình 6, 7)
+  key_length: 1024       # Kích thước khóa (bits) 
+  
+  # Chi phí tính toán ảo (Simulation Mode)
+  # Dùng để tính toán nhanh mà không cần chạy mã hóa thật lúc training
+  overhead_cycles_per_bit: 800 # c_m^en 
+  
+  # Cờ điều khiển chế độ
+  mode: "simulation"     # "simulation" (dùng công thức) hoặc "emulation" (chạy thật)

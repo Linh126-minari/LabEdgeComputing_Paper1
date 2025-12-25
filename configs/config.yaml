@@ -1,0 +1,21 @@
+# configs/config.yaml
+defaults:
+  - env: scenario_default      # Load configs/env/scenario_default.yaml
+  - agent: dueling_dqn         # Load configs/agent/dueling_dqn.yaml
+  - security: paillier_params  # Load configs/security/paillier_params.yaml
+  - _self_
+
+# Cấu hình chung cho toàn hệ thống
+general:
+  project_name: "CSO-Sim-Framework"
+  random_seed: 42              # Để tái lập kết quả (Reproducibility)
+  device: "cuda"               # Hoặc "cpu"
+  verbose: true                # In log chi tiết
+
+# Quản lý đường dẫn (như đã thảo luận trước đó)
+paths:
+  root_dir: "."
+  data_raw: "data/raw"
+  data_processed: "data/processed"
+  checkpoints: "data/checkpoints"
+  logs: "outputs"

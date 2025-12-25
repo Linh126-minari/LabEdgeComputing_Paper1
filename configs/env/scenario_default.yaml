@@ -1,0 +1,54 @@
+# configs/env/scenario_default.yaml
+
+# Thông tin chung về kịch bản (Base Scenario from Paper)
+name: "Reproduce_Paper_Fig9"
+description: "Scenario with 10 users, 3 AVs, 1 MEC as described in Section 6"
+
+simulation:
+  duration: 100          # Số bước thời gian (time steps) mỗi episode
+  num_episodes: 500      # Tổng số episode huấn luyện
+
+# 1. Thông số Mạng & Kênh truyền 
+channel:
+  bandwidth_mec: 1.0e6   # B = 1 MHz
+  bandwidth_v2v: 0.8e6   # B_V2V = 0.8 MHz
+  noise_power: 3.0e-13   # W0 = 3e-13 W
+  channel_gain: 1.0e-13  # delta_0 = 1e-13
+  path_loss_exp: 4       # theta = 4
+
+# 2. Thông số MEC Server 
+mec_server:
+  count: 1
+  coverage_radius: 300.0 # L = 300m
+  cpu_frequency: 1.0e9   # f_j = 1 GHz
+  base_price: 1.0        # g_j0 (cents/cycle - giả định chuẩn hóa)
+  credibility: 0.9       # b_j (độ tin cậy cao)
+
+# 3. Thông số User Vehicles 
+users:
+  count: 10              # M = 10 users
+  velocity_min: 15.0     # 15 m/s
+  velocity_max: 25.0     # 25 m/s
+  tx_power: 0.2          # p_m = 0.2 W
+  idle_power: 0.05       # p_w = 0.05 W
+  
+  # Task parameters
+  task_size_min: 102400  # 100 kb (bits) 
+  task_size_max: 1024000 # 1000 kb (bits)
+  cycles_per_bit: 1000   # c_m = 1000 cycles/bit 
+  max_delay: 1.0         # t_m (s) - ngưỡng trễ tối đa
+  
+  # Economic params 
+  price_energy_local: 1.0 # lambda_l = 1 cents/J
+
+# 4. Thông số Auxiliary Vehicles (AV) 
+aux_vehicles:
+  count: 3               # N = 3 AVs
+  cpu_frequency: 0.5e9   # f_n = 0.5 GHz
+  base_price: 0.5        # g_n0 (thấp hơn MEC để cạnh tranh)
+  credibility: 0.8       # b_n
+  price_energy_av: 0.8   # lambda_n = 0.8 cents/J 
+
+# Mô hình di chuyển
+mobility:
+  type: "linear"         # linear hoặc sumo

@@ -1,0 +1,8 @@
+# configs/env/mobility_sumo.yaml
+
+type: "sumo"
+sumo_config:
+  net_file: "src/env/sumo_data/map.net.xml"    # File bản đồ đường đi
+  route_file: "src/env/sumo_data/routes.rou.xml" # File luồng giao thông
+  gui: false     # Tắt GUI để chạy training nhanh hơn
+  step_length: 1.0 # Mỗi step mô phỏng tương ứng 1s thực tế

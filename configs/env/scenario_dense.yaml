@@ -1,0 +1,13 @@
+# configs/env/scenario_dense.yaml
+defaults:
+  - scenario_default # Kế thừa toàn bộ tham số từ default
+
+name: "6G_Dense_Scenario"
+description: "High density scenario with 50 users and 10 AVs"
+
+users:
+  count: 50              # Tăng số lượng User lên 50
+  task_size_max: 2048000 # Task nặng hơn (2Mb) cho ứng dụng AR/VR 6G
+
+aux_vehicles:
+  count: 10              # Tăng số lượng xe hỗ trợ
