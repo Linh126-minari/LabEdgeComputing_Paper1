@@ -4,6 +4,19 @@
 name: "Reproduce_Paper_Fig9"
 description: "Scenario with 10 users, 3 AVs, 1 MEC as described in Section 6"
 
+# Flattened keys used directly by create_env_config
+num_users: 10
+num_mec_servers: 1
+num_auxiliary_vehicles: 3
+num_attack_vehicles: 2
+task_arrival_rate: 0.5
+task_size_min: 100
+task_size_max: 1000
+task_cycles_per_bit: 1000
+task_deadline: 1.0
+dt: 0.1
+episode_length: 1000
+
 simulation:
   duration: 100          # Số bước thời gian (time steps) mỗi episode
   num_episodes: 500      # Tổng số episode huấn luyện
@@ -52,3 +65,16 @@ aux_vehicles:
 # Mô hình di chuyển
 mobility:
   type: "linear"         # linear hoặc sumo
+
+# 5. Attack vehicle model
+attack:
+  count: 2
+  tx_power: 0.3
+  jamming_radius: 250.0
+  rate_penalty: 0.35
+  energy_penalty: 0.45
+  density: 2.0e-6
+  lane_count: 3
+  road_max_speed_mps: 25.0
+  frame_length_bits: 8192
+  encryption_block_length_bits: 2048

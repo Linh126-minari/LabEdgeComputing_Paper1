@@ -28,7 +28,7 @@ class DRLAgent:
     
     def __init__(self, 
                  state_dim: int,
-                 action_dim: int,
+                 action_dim,
                  learning_rate: float = 0.001,
                  gamma: float = 0.9,
                  epsilon_start: float = 1.0,
@@ -43,7 +43,7 @@ class DRLAgent:
         
         Args:
             state_dim: Dimension of state space
-            action_dim: Dimension of action space
+            action_dim: MultiDiscrete action dimensions (e.g., env.action_space.nvec)
             learning_rate: Learning rate for optimizer
             gamma: Discount factor
             epsilon_start: Initial epsilon for exploration
@@ -55,7 +55,8 @@ class DRLAgent:
             device: Device to use (cpu/cuda)
         """
         self.state_dim = state_dim
-        self.action_dim = action_dim
+        self.action_dim = np.array(action_dim, dtype=np.int64)
+        self.total_actions = int(np.prod(self.action_dim))
         self.learning_rate = learning_rate
         self.gamma = gamma
         self.epsilon = epsilon_start
@@ -69,10 +70,10 @@ class DRLAgent:
         
         # ==================== Networks ====================
         # Main Q-network (policy network)
-        self.q_network = DuelingNetwork(state_dim, action_dim).to(self.device)
+        self.q_network = DuelingNetwork(state_dim, self.total_actions).to(self.device)
         
         # Target Q-network (for stability)
-        self.target_network = DuelingNetwork(state_dim, action_dim).to(self.device)
+        self.target_network = DuelingNetwork(state_dim, self.total_actions).to(self.device)
         self.target_network.load_state_dict(self.q_network.state_dict())
         self.target_network.eval()  # No gradient for target network
         
@@ -88,7 +89,20 @@ class DRLAgent:
         self.episode_count = 0
         self.training_losses = deque(maxlen=100)
         
-        self.logger.info(f"DRL Agent initialized: state_dim={state_dim}, action_dim={action_dim}")
+        self.logger.info(
+            f"DRL Agent initialized: state_dim={state_dim}, action_dim={self.action_dim.tolist()}, "
+            f"total_actions={self.total_actions}"
+        )
+
+    def _flatten_action(self, action: np.ndarray) -> int:
+        """Convert MultiDiscrete action vector to flat action index."""
+        action_arr = np.asarray(action, dtype=np.int64)
+        return int(np.ravel_multi_index(action_arr, self.action_dim))
+
+    def _unflatten_action(self, action_idx: int) -> np.ndarray:
+        """Convert flat action index to MultiDiscrete action vector."""
+        action_tuple = np.unravel_index(int(action_idx), tuple(self.action_dim.tolist()))
+        return np.array(action_tuple, dtype=np.int64)
     
     def select_action(self, state: np.ndarray, training: bool = True) -> np.ndarray:
         """
@@ -104,21 +118,16 @@ class DRLAgent:
         if training and np.random.random() < self.epsilon:
             # Explore: random action
             action = np.array([
-                np.random.randint(0, self.action_dim[0]),  # offload target
-                np.random.randint(0, self.action_dim[1])   # resource level
-            ])
+                np.random.randint(0, int(dim)) for dim in self.action_dim
+            ], dtype=np.int64)
         else:
             # Exploit: greedy action from Q-network
             with torch.no_grad():
                 state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
                 q_values = self.q_network(state_tensor)
-                
-                # For multi-discrete actions, select argmax for each dimension
-                action_1 = q_values[:, :self.action_dim[0]].argmax(dim=1).item()
-                
-                # Simplified: use a combined action space or separate networks
-                # For now, flatten the action space
-                action = np.array([action_1, np.random.randint(0, self.action_dim[1])])
+
+                action_idx = int(q_values.argmax(dim=1).item())
+                action = self._unflatten_action(action_idx)
         
         return action
     
@@ -134,8 +143,8 @@ class DRLAgent:
             next_state: Resulting state
             done: Whether episode terminated
         """
-        # Convert action to single int if needed (for simplicity)
-        action_int = action[0] * self.action_dim[1] + action[1]
+        # Convert MultiDiscrete action to single index for DQN update.
+        action_int = self._flatten_action(action)
         self.replay_buffer.add(state, action_int, reward, next_state, done)
     
     def train_step(self) -> float:

@@ -1,0 +1,3 @@
+- +general.num_episodes=2
+- general.device=cpu
+- +general.log_interval=1

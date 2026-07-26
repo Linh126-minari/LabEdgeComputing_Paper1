@@ -19,4 +19,5 @@ hyperparameters:
   target_update_freq: 100 # Cập nhật mạng target sau mỗi 100 steps
 
   # Discretization (Rời rạc hóa hành động liên tục beta)
+  alpha_levels: 10      # Mức rời rạc cho alpha_l, alpha_j, alpha_n
   action_levels: 10      # Chia tài nguyên thành 10 mức {0.1, ..., 1.0}

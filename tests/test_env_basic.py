@@ -8,6 +8,7 @@ def main():
     aux = AuxVehicle(id=1, position=np.array([50.0, 10.0]), cpu_frequency=0.5e9)
     user = User(id=2, position=np.array([-250.0, 5.0]), cpu_frequency=0.5e9)
     channel = ChannelModel()
+    
 
     # 2. Sinh Task
     user.generate_task()

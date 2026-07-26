@@ -1,0 +1,119 @@
+[2026-06-09 22:11:59,504][TrainingScript][INFO] - ================================================================================
+[2026-06-09 22:11:59,506][TrainingScript][INFO] - Starting training for Vehicular Edge Computing DRL Agent
+[2026-06-09 22:11:59,506][TrainingScript][INFO] - ================================================================================
+[2026-06-09 22:11:59,508][TrainingScript][INFO] - Config:
+env:
+  name: Reproduce_Paper_Fig9
+  description: Scenario with 10 users, 3 AVs, 1 MEC as described in Section 6
+  num_users: 10
+  num_mec_servers: 1
+  num_auxiliary_vehicles: 3
+  num_attack_vehicles: 2
+  task_arrival_rate: 0.5
+  task_size_min: 100
+  task_size_max: 1000
+  task_cycles_per_bit: 1000
+  task_deadline: 1.0
+  dt: 0.1
+  episode_length: 1000
+  simulation:
+    duration: 100
+    num_episodes: 500
+  channel:
+    bandwidth_mec: 1000000.0
+    bandwidth_v2v: 800000.0
+    noise_power: 3.0e-13
+    channel_gain: 1.0e-13
+    path_loss_exp: 4
+  mec_server:
+    count: 1
+    coverage_radius: 300.0
+    cpu_frequency: 1000000000.0
+    base_price: 1.0
+    credibility: 0.9
+  users:
+    count: 10
+    velocity_min: 15.0
+    velocity_max: 25.0
+    tx_power: 0.2
+    idle_power: 0.05
+    task_size_min: 102400
+    task_size_max: 1024000
+    cycles_per_bit: 1000
+    max_delay: 1.0
+    price_energy_local: 1.0
+  aux_vehicles:
+    count: 3
+    cpu_frequency: 500000000.0
+    base_price: 0.5
+    credibility: 0.8
+    price_energy_av: 0.8
+  mobility:
+    type: linear
+  attack:
+    count: 2
+    tx_power: 0.3
+    jamming_radius: 250.0
+    rate_penalty: 0.35
+    energy_penalty: 0.45
+    density: 2.0e-06
+    lane_count: 3
+    road_max_speed_mps: 25.0
+    frame_length_bits: 8192
+    encryption_block_length_bits: 2048
+agent:
+  name: DuelingDQN
+  algo: DDRP
+  hyperparameters:
+    learning_rate: 0.001
+    gamma: 0.9
+    batch_size: 64
+    buffer_size: 100000
+    epsilon_start: 1.0
+    epsilon_end: 0.01
+    epsilon_decay: 0.995
+    hidden_size: 256
+    target_update_freq: 100
+    alpha_levels: 10
+    action_levels: 10
+security:
+  encryption:
+    enabled: true
+    key_length: 1024
+    security_level: 1.0
+    overhead_cycles_per_bit: 800
+    mode: simulation
+general:
+  project_name: CSO-Sim-Framework
+  random_seed: 42
+  device: cpu
+  verbose: true
+  weight_delay: 1.0
+  weight_energy: 0.5
+  weight_cost: 0.3
+  weight_security: 0.4
+  weight_penalty: 100.0
+  num_episodes: 2
+  log_interval: 1
+paths:
+  root_dir: .
+  data_raw: data/raw
+  data_processed: data/processed
+  checkpoints: data/checkpoints
+  logs: outputs
+
+[2026-06-09 22:11:59,509][TrainingScript][INFO] - Creating environment...
+[2026-06-09 22:11:59,609][VehicularEdgeEnv][INFO] - Environment initialized with 10 users, 1 MEC, 3 aux vehicles
+[2026-06-09 22:11:59,609][TrainingScript][INFO] - Environment created: state_dim=15, action_dim=(3,)
+[2026-06-09 22:11:59,609][TrainingScript][INFO] - Creating DRL agent...
+[2026-06-09 22:12:00,684][DRLAgent][INFO] - DRL Agent initialized: state_dim=15, action_dim=[10, 2, 10], total_actions=200
+[2026-06-09 22:12:00,685][TrainingScript][INFO] - DRL agent created successfully
+[2026-06-09 22:12:00,685][TrainingScript][INFO] - Starting training for 2 episodes...
+[2026-06-09 22:12:00,734][TrainingScript][INFO] - Episode    1 | Reward: -4962.8731 | Avg Loss:   0.000000 | Epsilon: 0.995000
+[2026-06-09 22:12:00,891][TrainingScript][INFO] - Episode    2 | Reward: -3344.3460 | Avg Loss: 6175.147680 | Epsilon: 0.990025
+[2026-06-09 22:12:00,891][TrainingScript][INFO] - Saving results...
+[2026-06-09 22:12:00,895][DRLAgent][INFO] - Model saved to outputs\CSO-Sim-Framework\agent_model.pth
+[2026-06-09 22:12:00,907][TrainingScript][INFO] - Results saved to outputs\CSO-Sim-Framework
+[2026-06-09 22:12:00,908][TrainingScript][INFO] - ================================================================================
+[2026-06-09 22:12:00,908][TrainingScript][INFO] - Training completed!
+[2026-06-09 22:12:00,908][TrainingScript][INFO] - ================================================================================

@@ -3,6 +3,7 @@
 encryption:
   enabled: true          # Bật/tắt tính năng bảo mật để so sánh (Hình 6, 7)
   key_length: 1024       # Kích thước khóa (bits) 
+  security_level: 1.0    # Hệ số mức bảo mật chuẩn hóa [0,1]
   
   # Chi phí tính toán ảo (Simulation Mode)
   # Dùng để tính toán nhanh mà không cần chạy mã hóa thật lúc training

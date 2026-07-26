@@ -1,15 +1,3 @@
-"""
-Vehicular Edge Computing Environment (MDP)
-==========================================
-Mô phỏng hệ thống Edge Computing cho xe tự động với:
-- Xe người dùng sinh task tính toán
-- MEC servers tại RSU
-- Auxiliary vehicles (V2V collaboration)
-- Mô hình truyền, di chuyển, bảo mật
-
-Tham khảo Paper: CSO-Sim-Framework
-"""
-
 import numpy as np
 from dataclasses import dataclass, field
 from typing import Tuple, Dict, Any, Optional, List
@@ -17,19 +5,21 @@ from collections import defaultdict
 import gymnasium as gym
 from gymnasium import spaces
 
-from src.env.entities import User, MECServer, AuxVehicle, Task, ComputingNode
+from src.env.entities import User, MECServer, AuxVehicle, AttackVehicle, Task, ComputingNode
 from src.env.channel import ChannelModel
 from src.env.mobility import LinearMobility
 from src.security.crypto_engine import SecurityModule
+from src.security.overhead_models import SecurityOverheadConfig, SecurityOverheadModel
 from src.utils.logger import Logger
 
 
 @dataclass
 class EnvironmentConfig:
-    """Cấu hình môi trường"""
+    #Cấu hình môi trường
     num_users: int = 5
     num_mec_servers: int = 2
     num_auxiliary_vehicles: int = 3
+    num_attack_vehicles: int = 2
     
     # Khu vực mô phỏng
     sim_area_x: float = 1000.0  # meters
@@ -50,13 +40,34 @@ class EnvironmentConfig:
     weight_delay: float = 1.0
     weight_energy: float = 0.5
     weight_cost: float = 0.3
+    weight_security: float = 0.4
+    weight_secure_capacity: float = 0.2
     weight_penalty: float = 100.0  # Penalty khi vi phạm deadline
     
     # Security
     encryption_enabled: bool = True
     encryption_mode: str = "simulation"  # "simulation" hoặc "emulation"
+    encryption_overhead_cycles_per_bit: float = 800.0
+    security_level: float = 1.0
+
+    # Attacker & security risk model
+    attack_risk_alpha: float = 3.0
+    attack_risk_beta: float = 2.0
+    attack_rate_penalty: float = 0.35
+    attack_energy_penalty: float = 0.45
+    attacker_tx_power: float = 0.3
+    attacker_jamming_radius: float = 250.0
+    attacker_density: float = 2e-6
+
+    # Paper adversary model (Eq. 5-9)
+    frame_length_bits: float = 8192.0
+    encryption_block_length_bits: float = 2048.0
+    lane_count: float = 3.0
+    road_max_speed_mps: float = 25.0
+    v2v_range: float = 200.0
     
     # Action discretization
+    alpha_levels: int = 10  # Discretization levels for alpha_l, alpha_j, alpha_n
     action_levels: int = 10  # 0-9 resource levels
     
     # Other
@@ -69,7 +80,7 @@ class VehicularEdgeEnvironment(gym.Env):
     Môi trường MDP cho Vehicular Edge Computing.
     
     State: Vector chứa thông tin task, khoảng cách, tài nguyên, kênh
-    Action: Quyết định offload (target node) + mức tài nguyên (discretized)
+    Action: [alpha_l_level, alpha_j_level, alpha_n_level, resource_level]
     Reward: Weighted combination của delay, energy, cost, penalty
     """
     
@@ -86,6 +97,9 @@ class VehicularEdgeEnvironment(gym.Env):
         self.config = config
         self.logger = Logger("VehicularEdgeEnv")
         
+        # Track active resource allocations to dynamically release them later
+        self.active_allocations: List[Tuple[float, str, int, float, float]] = []
+        
         # ==================== Initialize Entities ====================
         # User vehicles
         self.users: List[User] = []
@@ -98,10 +112,28 @@ class VehicularEdgeEnvironment(gym.Env):
         # Auxiliary vehicles
         self.auxiliary_vehicles: List[AuxVehicle] = []
         self._init_auxiliary_vehicles()
+
+        # Attack vehicles
+        self.attack_vehicles: List[AttackVehicle] = []
+        self._init_attack_vehicles()
         
         # ==================== Initialize Models ====================
         self.channel_model = ChannelModel()
         self.security_module = SecurityModule(key_length=1024) if config.encryption_enabled else None
+        self.security_overhead_model = SecurityOverheadModel(
+            SecurityOverheadConfig(
+                overhead_cycles_per_bit=config.encryption_overhead_cycles_per_bit,
+                user_cpu_frequency=config.user_cpu_frequency,
+                security_level=config.security_level,
+                attack_rate_penalty=config.attack_rate_penalty,
+                attack_energy_penalty=config.attack_energy_penalty,
+                frame_length_bits=config.frame_length_bits,
+                default_block_length_bits=config.encryption_block_length_bits,
+                attacker_density=config.attacker_density,
+                lane_count=config.lane_count,
+                max_speed_mps=config.road_max_speed_mps,
+            )
+        )
         
         # ==================== Simulation State ====================
         self.current_time: float = 0.0
@@ -126,9 +158,13 @@ class VehicularEdgeEnvironment(gym.Env):
         state_dim = self._get_state_dim()
         self.observation_space = spaces.Box(low=0, high=1, shape=(state_dim,), dtype=np.float32)
         
-        # Action: [offload_target (0=local, 1=MEC, 2+=AuxVehicles), resource_level]
-        num_targets = 1 + 1 + len(self.auxiliary_vehicles)  # local + MEC + aux vehicles
-        self.action_space = spaces.MultiDiscrete([num_targets, config.action_levels])
+        # Action: [alpha_l_level, alpha_j_level, alpha_n_level, resource_level]
+        # Constraint is enforced in step: local+MEC or local+AUX (not both MEC and AUX).
+        self.action_space = spaces.MultiDiscrete([
+            config.alpha_levels,
+            2,  # 0: MEC, 1: AUX target selection
+            config.action_levels,
+        ])
         
         self.logger.info(f"Environment initialized with {len(self.users)} users, "
                         f"{len(self.mec_servers)} MEC, {len(self.auxiliary_vehicles)} aux vehicles")
@@ -195,9 +231,27 @@ class VehicularEdgeEnvironment(gym.Env):
         # Distances: to MEC (x num_mec), to aux (x num_aux)
         # Resources: MEC utilization (x num_mec), aux utilization (x num_aux)
         # Channel: SNR, rate
+        # Security: min attacker distance, security_level
         dim = 3 + len(self.mec_servers) + len(self.auxiliary_vehicles) + \
-              len(self.mec_servers) + len(self.auxiliary_vehicles) + 2
+              len(self.mec_servers) + len(self.auxiliary_vehicles) + 4
         return dim
+
+    def _init_attack_vehicles(self):
+        """Khởi tạo attack vehicles"""
+        for i in range(self.config.num_attack_vehicles):
+            pos = np.array([
+                np.random.uniform(0, self.config.sim_area_x),
+                np.random.uniform(0, self.config.sim_area_y)
+            ])
+            attacker = AttackVehicle(
+                id=i,
+                position=pos,
+                cpu_frequency=1e8,
+                tx_power=self.config.attacker_tx_power,
+                jamming_radius=self.config.attacker_jamming_radius,
+                mobility_model=LinearMobility()
+            )
+            self.attack_vehicles.append(attacker)
     
     # ==================== MDP Methods ====================
     
@@ -220,6 +274,12 @@ class VehicularEdgeEnvironment(gym.Env):
                 np.random.uniform(0, self.config.sim_area_x),
                 np.random.uniform(0, self.config.sim_area_y)
             ])
+
+        for attacker in self.attack_vehicles:
+            attacker.position = np.array([
+                np.random.uniform(0, self.config.sim_area_x),
+                np.random.uniform(0, self.config.sim_area_y)
+            ])
         
         # Reset state
         self.current_time = 0.0
@@ -227,10 +287,13 @@ class VehicularEdgeEnvironment(gym.Env):
         self.task_queue.clear()
         self.task_history.clear()
         self.next_task_id = 0
+        self.active_allocations.clear()
         
         # Reset resources
         self.mec_cpu_available = [self.config.mec_cpu_frequency] * len(self.mec_servers)
+        self.mec_bw_available = [1e7] * len(self.mec_servers)
         self.aux_cpu_available = [self.config.aux_cpu_frequency] * len(self.auxiliary_vehicles)
+        self.aux_bw_available = [5e6] * len(self.auxiliary_vehicles)
         
         # Reset auxiliary vehicles
         for aux in self.auxiliary_vehicles:
@@ -244,117 +307,242 @@ class VehicularEdgeEnvironment(gym.Env):
         
         return state
     
+    def _decode_action_to_alphas(self, action: np.ndarray) -> Tuple[float, float, float, int]:
+        """
+        Decode action into alpha ratios and resource level.
+
+        Action format: [alpha_l_level, target_selection, resource_level]
+        Constraint is enforced:
+        - either local + MEC: alpha_l + alpha_j = 1, alpha_n = 0
+        - or local + AUX: alpha_l + alpha_n = 1, alpha_j = 0
+        """
+        alpha_levels = max(int(self.config.alpha_levels), 1)
+        action_arr = np.asarray(action, dtype=np.int64).flatten()
+        if action_arr.size < 3:
+            raise ValueError(f"Expected action with 3 dimensions, got {action_arr.size}: {action}")
+
+        alpha_l_level = int(np.clip(action_arr[0], 0, alpha_levels - 1))
+        target_selection = int(np.clip(action_arr[1], 0, 1))  # 0: MEC, 1: AUX
+        resource_level = int(np.clip(action_arr[2], 0, int(self.config.action_levels) - 1))
+
+        # alpha_l is directly controlled by first dimension.
+        scale = float(max(alpha_levels - 1, 1))
+        alpha_l = float(alpha_l_level / scale)
+        alpha_remote = max(0.0, 1.0 - alpha_l)
+
+        if alpha_remote <= 1e-12:
+            return 1.0, 0.0, 0.0, resource_level
+
+        if target_selection == 0:
+            return alpha_l, alpha_remote, 0.0, resource_level
+
+        return alpha_l, 0.0, alpha_remote, resource_level
+
+    def _release_resources(self):
+        """Release CPU and bandwidth resources for tasks that have finished execution."""
+        still_active = []
+        for alloc in self.active_allocations:
+            release_time, node_type, node_idx, cpu_freq, bw = alloc
+            if self.current_time >= release_time:
+                if node_type == "mec":
+                    self.mec_cpu_available[node_idx] = min(
+                        self.config.mec_cpu_frequency,
+                        self.mec_cpu_available[node_idx] + cpu_freq
+                    )
+                    self.mec_bw_available[node_idx] = min(
+                        1e7,  # max MEC bandwidth pool
+                        self.mec_bw_available[node_idx] + bw
+                    )
+                elif node_type == "aux":
+                    self.aux_cpu_available[node_idx] = min(
+                        self.config.aux_cpu_frequency,
+                        self.aux_cpu_available[node_idx] + cpu_freq
+                    )
+                    self.aux_bw_available[node_idx] = min(
+                        5e6,  # max AUX bandwidth pool
+                        self.aux_bw_available[node_idx] + bw
+                    )
+                    self.auxiliary_vehicles[node_idx].current_load = max(
+                        0,
+                        self.auxiliary_vehicles[node_idx].current_load - 1
+                    )
+            else:
+                still_active.append(alloc)
+        self.active_allocations = still_active
+
+    def _make_subtask(self, task: Task, ratio: float) -> Optional[Task]:
+        """Create a proportional subtask for a given offloading ratio."""
+        ratio = float(max(ratio, 0.0))
+        if ratio <= 1e-12:
+            return None
+        return Task(
+            size=task.size * ratio,
+            cycles_per_bit=task.cycles_per_bit,
+            max_delay=task.max_delay,
+        )
+
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, Dict]:
         """
         Thực hiện một step trong môi trường.
         
         Args:
-            action: [offload_target, resource_level]
-                offload_target: 0=local, 1=MEC[0], 2=MEC[1], 2+i=Aux[i]
-                resource_level: 0-9 (10 levels của tài nguyên allocation)
+            action: [alpha_l_level, target_selection, resource_level]
         
         Returns:
             (state, reward, done, info)
         """
         # ==================== Decode Action ====================
-        offload_target = int(action[0])
-        resource_level = int(action[1])
+        alpha_l, alpha_j, alpha_n, resource_level = self._decode_action_to_alphas(action)
         
         # ==================== Get Current User & Task ====================
-        # Giả sử chúng ta xử lý task của user đầu tiên
-        # Có thể mở rộng để multi-user sau
         user = self.users[0]
         
-        if not self.task_queue[user.id]:
-            # Không có task, generate một task mới
+        # Event-driven task pop: advance time/positions until a task arrives
+        while not self.task_queue[user.id]:
+            self._update_vehicle_positions()
             self._generate_tasks()
+            self.current_time += self.config.dt
+            self.step_count += 1
+            self._release_resources()
+            
+            if self.step_count >= self.config.episode_length:
+                done = True
+                return self._get_state(), 0.0, done, {"error": "no_task_timeout"}
         
-        if self.task_queue[user.id]:
-            task = self.task_queue[user.id].pop(0)
-        else:
-            # Không thể sinh task, trả về penalty
-            reward = -10.0
-            done = self.step_count >= self.config.episode_length
-            return self._get_state(), reward, done, {"error": "no_task"}
+        task = self.task_queue[user.id].pop(0)
         
-        # ==================== Decide Offloading ====================
-        selected_node = None
-        delay = 0.0
+        # ==================== Decrypt & Encrypt Sequential Overhead ====================
+        # Encryption is performed sequentially at the UV ONLY for the offloaded task portion.
+        offload_size = task.size * (alpha_j + alpha_n)
+        t_enc = 0.0
+        E_enc = 0.0
+        if self.config.encryption_enabled and offload_size > 0:
+            t_enc = self._estimate_encryption_overhead(offload_size)
+            E_enc = self.security_overhead_model.encryption_energy(offload_size)
+        
+        # ==================== Decide Offloading (Parallel Execution) ====================
         energy = 0.0
         cost = 0.0
-        deadline_violated = False
-        offload_location = None
-        
-        if offload_target == 0:
-            # Local computation
-            delay = self._compute_local_delay(user, task)
-            energy = self._compute_local_energy(user, task)
-            cost = 0.0
-            offload_location = "local"
-        
-        elif offload_target == 1:
-            # Offload to MEC server (first MEC)
+        security_risk = 0.0
+        secure_capacity = 0.0
+        offload_locations: List[str] = []
+        branch_delays: List[float] = []
+
+        # 1) Local branch: alpha_l
+        local_task = self._make_subtask(task, alpha_l)
+        if local_task is not None:
+            local_delay = self._compute_local_delay(user, local_task)
+            local_energy = self._compute_local_energy(user, local_task)
+            branch_delays.append(local_delay)
+            energy += local_energy
+            offload_locations.append("local")
+
+        # 2) MEC branch: alpha_j
+        mec_task = self._make_subtask(task, alpha_j)
+        if mec_task is not None:
+            mec_done = False
             if self.mec_servers:
                 mec = self.mec_servers[0]
-                
-                # Check coverage
                 if mec.is_covered(user):
-                    # Allocate resources
-                    cpu_freq = self._get_resource_allocation(
-                        self.mec_cpu_available[0], resource_level
+                    cpu_alloc = self._get_resource_allocation(self.mec_cpu_available[0], resource_level)
+                    bw_alloc = self._get_bandwidth_allocation(self.mec_bw_available[0], resource_level)
+
+                    # CPU frequency allocation is independent of alpha to fix the cancellation bug.
+                    cpu_freq = max(1.0, cpu_alloc)
+                    bw = max(1.0, bw_alloc)
+
+                    mec_delay, mec_risk, tx_time, mec_secure_capacity = self._compute_mec_delay(
+                        user, mec, mec_task, cpu_freq, bw
                     )
-                    bw = self._get_bandwidth_allocation(
-                        self.mec_bw_available[0], resource_level
+                    mec_energy = self._compute_offloading_energy(user, mec_task, tx_time, mec_risk)
+                    mec_cost = self._compute_mec_cost(mec, mec_task, resource_level)
+
+                    energy += mec_energy
+                    cost += mec_cost
+                    security_risk += alpha_j * mec_risk
+                    secure_capacity += alpha_j * mec_secure_capacity
+                    branch_delays.append(mec_delay)
+
+                    # Reserve resources and track allocation
+                    self.mec_cpu_available[0] = max(0.0, self.mec_cpu_available[0] - cpu_freq)
+                    self.mec_bw_available[0] = max(0.0, self.mec_bw_available[0] - bw)
+                    self.active_allocations.append((
+                        self.current_time + mec_delay,
+                        "mec",
+                        0,
+                        cpu_freq,
+                        bw
+                    ))
+                    
+                    offload_locations.append("MEC_0")
+                    mec_done = True
+
+            if not mec_done:
+                # Fallback: process MEC fraction locally when MEC is unavailable/out-of-coverage.
+                fb_delay = self._compute_local_delay(user, mec_task)
+                fb_energy = self._compute_local_energy(user, mec_task)
+                energy += fb_energy
+                branch_delays.append(fb_delay)
+                offload_locations.append("local_fallback_mec")
+
+        # 3) Auxiliary branch: alpha_n (route to nearest in-range auxiliary vehicle)
+        aux_task = self._make_subtask(task, alpha_n)
+        if aux_task is not None:
+            aux_done = False
+            if self.auxiliary_vehicles:
+                nearest_aux_idx = int(np.argmin([user.get_distance(aux) for aux in self.auxiliary_vehicles]))
+                aux = self.auxiliary_vehicles[nearest_aux_idx]
+                if user.get_distance(aux) <= self.config.v2v_range:
+                    cpu_alloc = self._get_resource_allocation(self.aux_cpu_available[nearest_aux_idx], resource_level)
+                    bw_alloc = self._get_bandwidth_allocation(self.aux_bw_available[nearest_aux_idx], resource_level)
+                    
+                    # CPU frequency allocation is independent of alpha to fix the cancellation bug.
+                    cpu_freq = max(1.0, cpu_alloc)
+                    bw = max(1.0, bw_alloc)
+
+                    aux_delay, aux_risk, tx_time, aux_secure_capacity = self._compute_v2v_delay(
+                        user, aux, aux_task, cpu_freq, bw
                     )
-                    
-                    delay = self._compute_mec_delay(user, mec, task, cpu_freq, bw)
-                    energy = self._compute_offloading_energy(user, task, delay)
-                    cost = self._compute_mec_cost(mec, task, resource_level)
-                    
-                    # Update resource availability
-                    self.mec_cpu_available[0] -= cpu_freq
-                    self.mec_bw_available[0] -= bw
-                    
-                    offload_location = "MEC_0"
-                else:
-                    # Out of coverage, fallback to local
-                    delay = self._compute_local_delay(user, task)
-                    energy = self._compute_local_energy(user, task)
-                    cost = 0.0
-                    offload_location = "local_fallback"
-        
-        else:
-            # Offload to auxiliary vehicle
-            aux_idx = offload_target - 2
-            if aux_idx < len(self.auxiliary_vehicles):
-                aux = self.auxiliary_vehicles[aux_idx]
-                
-                # Check distance (V2V range)
-                dist = user.get_distance(aux)
-                if dist <= 200.0:  # V2V range
-                    cpu_freq = self._get_resource_allocation(
-                        self.aux_cpu_available[aux_idx], resource_level
-                    )
-                    bw = self._get_bandwidth_allocation(
-                        self.aux_bw_available[aux_idx], resource_level
-                    )
-                    
-                    delay = self._compute_v2v_delay(user, aux, task, cpu_freq, bw)
-                    energy = self._compute_offloading_energy(user, task, delay)
-                    cost = self._compute_aux_cost(aux, task, resource_level)
-                    
-                    # Update resource availability
-                    self.aux_cpu_available[aux_idx] -= cpu_freq
-                    self.aux_bw_available[aux_idx] -= bw
+                    aux_energy = self._compute_offloading_energy(user, aux_task, tx_time, aux_risk)
+                    aux_cost = self._compute_aux_cost(aux, aux_task, resource_level)
+
+                    energy += aux_energy
+                    cost += aux_cost
+                    security_risk += alpha_n * aux_risk
+                    secure_capacity += alpha_n * aux_secure_capacity
+                    branch_delays.append(aux_delay)
+
+                    # Reserve resources and track allocation
+                    self.aux_cpu_available[nearest_aux_idx] = max(0.0, self.aux_cpu_available[nearest_aux_idx] - cpu_freq)
+                    self.aux_bw_available[nearest_aux_idx] = max(0.0, self.aux_bw_available[nearest_aux_idx] - bw)
                     aux.current_load += 1
+                    self.active_allocations.append((
+                        self.current_time + aux_delay,
+                        "aux",
+                        nearest_aux_idx,
+                        cpu_freq,
+                        bw
+                    ))
                     
-                    offload_location = f"Aux_{aux_idx}"
-                else:
-                    # Out of V2V range, fallback to local
-                    delay = self._compute_local_delay(user, task)
-                    energy = self._compute_local_energy(user, task)
-                    cost = 0.0
-                    offload_location = "local_fallback"
+                    offload_locations.append(f"Aux_{nearest_aux_idx}")
+                    aux_done = True
+
+            if not aux_done:
+                # Fallback: process auxiliary fraction locally when no AV is in range.
+                fb_delay = self._compute_local_delay(user, aux_task)
+                fb_energy = self._compute_local_energy(user, aux_task)
+                energy += fb_energy
+                branch_delays.append(fb_delay)
+                offload_locations.append("local_fallback_aux")
+
+        # E2E delay is sequential encryption delay + max parallel branch delay
+        max_parallel_delay = max(branch_delays) if branch_delays else 0.0
+        delay = t_enc + max_parallel_delay
+        
+        # Add sequential encryption energy
+        energy += E_enc
+
+        offload_location = "+".join(offload_locations) if offload_locations else "none"
         
         # Check deadline violation
         deadline_violated = delay > task.max_delay
@@ -373,14 +561,80 @@ class VehicularEdgeEnvironment(gym.Env):
             "delay": delay,
             "energy": energy,
             "cost": cost,
+            "security_risk": security_risk,
+            "secure_capacity": secure_capacity,
             "deadline_violated": deadline_violated,
             "offload_location": offload_location,
+            "alpha_l": alpha_l,
+            "alpha_j": alpha_j,
+            "alpha_n": alpha_n,
             "timestamp": self.current_time
         }
         self.next_task_id += 1
         
         # ==================== Compute Reward ====================
-        reward = self._compute_reward(delay, energy, cost, deadline_violated, task)
+        reward = self._compute_reward(delay, energy, cost, security_risk, secure_capacity, deadline_violated, task)
+        
+        # ==================== Update Time ====================
+        self.current_time += self.config.dt
+        self.step_count += 1
+        
+        # ==================== Release resources at this timestep ====================
+        self._release_resources()
+        
+        # ==================== Check Done ====================
+        done = self.step_count >= self.config.episode_length
+        
+        # ==================== Get Next State ====================
+        state = self._get_state()
+        
+        # ==================== Info Dict ====================
+        info = {
+            "alpha": [alpha_l, alpha_j, alpha_n],
+            "task_delay": delay,
+            "task_energy": energy,
+            "task_cost": cost,
+            "task_security_risk": security_risk,
+            "task_secure_capacity": secure_capacity,
+            "deadline_violated": deadline_violated,
+            "offload_location": offload_location,
+            "num_tasks_completed": len(self.task_history)
+        }
+        
+        return state, reward, done, info
+
+        offload_location = "+".join(offload_locations) if offload_locations else "none"
+        
+        # Check deadline violation
+        deadline_violated = delay > task.max_delay
+        
+        # ==================== Update Environment State ====================
+        # Move vehicles
+        self._update_vehicle_positions()
+        
+        # Generate new tasks
+        self._generate_tasks()
+        
+        # Record task execution
+        task_id = self.next_task_id
+        self.task_history[task_id] = {
+            "user_id": user.id,
+            "delay": delay,
+            "energy": energy,
+            "cost": cost,
+            "security_risk": security_risk,
+            "secure_capacity": secure_capacity,
+            "deadline_violated": deadline_violated,
+            "offload_location": offload_location,
+            "alpha_l": alpha_l,
+            "alpha_j": alpha_j,
+            "alpha_n": alpha_n,
+            "timestamp": self.current_time
+        }
+        self.next_task_id += 1
+        
+        # ==================== Compute Reward ====================
+        reward = self._compute_reward(delay, energy, cost, security_risk, secure_capacity, deadline_violated, task)
         
         # ==================== Update Time ====================
         self.current_time += self.config.dt
@@ -394,9 +648,12 @@ class VehicularEdgeEnvironment(gym.Env):
         
         # ==================== Info Dict ====================
         info = {
+            "alpha": [alpha_l, alpha_j, alpha_n],
             "task_delay": delay,
             "task_energy": energy,
             "task_cost": cost,
+            "task_security_risk": security_risk,
+            "task_secure_capacity": secure_capacity,
             "deadline_violated": deadline_violated,
             "offload_location": offload_location,
             "num_tasks_completed": len(self.task_history)
@@ -407,71 +664,124 @@ class VehicularEdgeEnvironment(gym.Env):
     # ==================== Delay Computation ====================
     
     def _compute_local_delay(self, user: User, task: Task) -> float:
-        """
-        Tính độ trễ tính toán cục bộ.
-        
-        t_local = (c_m * s_m) / f_m + t_encrypt
-        """
-        # Computation time
         computation_time = (task.cycles_per_bit * task.size) / user.cpu_frequency
-        
-        # Encryption overhead (nếu có)
-        encryption_time = 0.0
-        if self.config.encryption_enabled:
-            encryption_time = self._estimate_encryption_overhead(task.size)
-        
-        return computation_time + encryption_time
+        return computation_time
     
-    def _compute_mec_delay(self, user: User, mec: MECServer, task: Task, 
-                           cpu_freq: float, bandwidth: float) -> float:
+    def _compute_mec_delay(self, user: User, mec: MECServer, task: Task,
+                           cpu_freq: float, bandwidth: float) -> Tuple[float, float, float, float]:
         """
         Tính độ trễ offload tới MEC.
         
-        t_total = t_upload + t_compute + t_download + t_encrypt
-        
-        Ref: Eq 9, 17 (paper)
+        Partial MEC component:
+        t_mec = t_upload + t_compute, với s_j = alpha_j * s_m (mã hóa đã tính tuần tự trước đó)
         """
         # Upload time: t_upload = s_m / r_ul
         dist_to_mec = user.get_distance(mec)
-        uplink_rate = self.channel_model.get_uplink_rate_mec(dist_to_mec, user.tx_power)
+        nominal_rate = self.channel_model.get_uplink_rate_mec(dist_to_mec, user.tx_power)
+        attack_prob, secure_capacity = self._compute_security_metrics(
+            task=task,
+            communication_radius=mec.coverage_radius,
+            link_rate_bps=nominal_rate,
+        )
+        uplink_rate = self.security_overhead_model.effective_rate(nominal_rate, attack_prob)
         upload_time = task.size / max(uplink_rate, 1.0)  # bits to bit/s
         
         # Computation time at MEC
         computation_time = (task.cycles_per_bit * task.size) / cpu_freq
         
-        # Download time (simplified: assume same as upload)
-        download_time = upload_time
-        
-        # Encryption overhead
-        encryption_time = 0.0
-        if self.config.encryption_enabled:
-            encryption_time = self._estimate_encryption_overhead(task.size)
-        
-        total_delay = upload_time + computation_time + download_time + encryption_time
-        return total_delay
+        total_delay = upload_time + computation_time
+        return total_delay, attack_prob, upload_time, secure_capacity
     
     def _compute_v2v_delay(self, user: User, aux: AuxVehicle, task: Task,
-                           cpu_freq: float, bandwidth: float) -> float:
+                           cpu_freq: float, bandwidth: float) -> Tuple[float, float, float, float]:
         """
         Tính độ trễ offload tới auxiliary vehicle (V2V).
-        
-        Similar to MEC but with V2V channel model.
         """
         # V2V transmission rate
         dist_to_aux = user.get_distance(aux)
-        v2v_rate = self.channel_model.get_uplink_rate_v2v(dist_to_aux, user.tx_power)
+        nominal_rate = self.channel_model.get_uplink_rate_v2v(dist_to_aux, user.tx_power)
+        attack_prob, secure_capacity = self._compute_security_metrics(
+            task=task,
+            communication_radius=self.config.v2v_range,
+            link_rate_bps=nominal_rate,
+        )
+        v2v_rate = self.security_overhead_model.effective_rate(nominal_rate, attack_prob)
         transmission_time = task.size / max(v2v_rate, 1.0)
         
         # Computation time
         computation_time = (task.cycles_per_bit * task.size) / cpu_freq
         
-        # Encryption
-        encryption_time = 0.0
-        if self.config.encryption_enabled:
-            encryption_time = self._estimate_encryption_overhead(task.size)
-        
-        total_delay = transmission_time + computation_time + encryption_time
-        return total_delay
+        total_delay = transmission_time + computation_time
+        return total_delay, attack_prob, transmission_time, secure_capacity
+
+    def _resolve_attacker_density(self) -> float:
+        """Ưu tiên mật độ attacker từ config, fallback theo số attacker trong map."""
+        if self.config.attacker_density > 0.0:
+            return self.config.attacker_density
+
+        area = max(self.config.sim_area_x * self.config.sim_area_y, 1.0)
+        return float(len(self.attack_vehicles) / area)
+
+    def _compute_security_metrics(
+        self,
+        task: Task,
+        communication_radius: float,
+        link_rate_bps: float,
+    ) -> Tuple[float, float]:
+        """
+        Áp dụng mô hình attacker trong paper (Eq. 6-9):
+        - Phi_i = (N_f - N_i) / N_f
+        - n_i^e = pi * d_i^2 * rho * (N_l / (3 v_max))
+        - S_i = (N_i / N_f)^(n_i^e)
+        - p_att = 1 - S_i
+        - U_i = (R_i / (8N_i)) * log2(8N_i) * S_i
+        """
+        n_f = max(self.config.frame_length_bits, 1.0)
+        n_i = min(max(self.config.encryption_block_length_bits, 1.0), n_f, task.size)
+
+        rho = self._resolve_attacker_density()
+        n_attackers_expected = self.security_overhead_model.expected_attackers(
+            coverage_radius_m=communication_radius,
+            attacker_density=rho,
+            lane_count=self.config.lane_count,
+            max_speed_mps=self.config.road_max_speed_mps,
+        )
+
+        if self.attack_vehicles:
+            n_attackers_expected = min(n_attackers_expected, float(len(self.attack_vehicles)))
+
+        security_strength = self.security_overhead_model.security_strength(
+            block_length_bits=n_i,
+            frame_length_bits=n_f,
+            n_attackers=n_attackers_expected,
+        )
+        attack_prob = self.security_overhead_model.attack_success_probability(
+            block_length_bits=n_i,
+            frame_length_bits=n_f,
+            n_attackers=n_attackers_expected,
+        )
+        secure_capacity = self.security_overhead_model.secure_information_capacity(
+            link_rate_bps=link_rate_bps,
+            block_length_bits=n_i,
+            security_strength=security_strength,
+        )
+
+        return attack_prob, secure_capacity
+
+    def _get_attack_success_probability(self, user: User) -> float:
+        """Compat wrapper: lấy p_att cho task/range mặc định."""
+        _ = user
+        dummy_task = Task(
+            size=self.config.encryption_block_length_bits,
+            cycles_per_bit=self.config.task_cycles_per_bit,
+            max_delay=self.config.task_deadline,
+        )
+        attack_prob, _ = self._compute_security_metrics(
+            task=dummy_task,
+            communication_radius=self.config.attacker_jamming_radius,
+            link_rate_bps=1.0,
+        )
+        return float(attack_prob)
     
     def _estimate_encryption_overhead(self, data_size_bits: float) -> float:
         """
@@ -485,9 +795,7 @@ class VehicularEdgeEnvironment(gym.Env):
             return 0.0
         
         if self.config.encryption_mode == "simulation":
-            # Use formula: c_en (cycles/bit) ~ 800, f_m = user CPU frequency
-            cycles_per_bit = 800  # from paillier_params.yaml
-            encryption_time = cycles_per_bit * data_size_bits / self.config.user_cpu_frequency
+            encryption_time = self.security_overhead_model.encryption_time(data_size_bits)
             return encryption_time
         else:
             # emulation mode: run actual encryption
@@ -508,16 +816,19 @@ class VehicularEdgeEnvironment(gym.Env):
         power = 1.0  # Watts (simplified)
         return power * computation_time
     
-    def _compute_offloading_energy(self, user: User, task: Task, delay: float) -> float:
+    def _compute_offloading_energy(self, user: User, task: Task,
+                                   tx_time: float, attack_probability: float = 0.0) -> float:
         """
         Tính năng lượng tiêu thụ khi offload.
         
-        E_offload = P_tx * t_transmission (simplified, không tính computation)
+        E_offload = P_tx * t_transmission (mã hóa đã tính tuần tự trước đó)
         """
-        # Ước lượng: transmission time ~ 70% của total delay
-        transmission_time = delay * 0.7
-        energy = user.tx_power * transmission_time
-        return energy
+        nominal_tx_energy = user.tx_power * tx_time
+        effective_tx_energy = self.security_overhead_model.effective_tx_energy(
+            nominal_tx_energy,
+            attack_probability,
+        )
+        return effective_tx_energy
     
     # ==================== Cost Computation ====================
     
@@ -525,36 +836,50 @@ class VehicularEdgeEnvironment(gym.Env):
         """
         Tính chi phí sử dụng MEC.
         
-        Cost = g_j * (based on urgency, resource level)
+        Partial MEC cost component:
+        Cost_j \\propto workload_j * urgency * resource_level,
+        với workload_j = s_j * c_m và s_j = alpha_j * s_m.
         """
         # Urgency (deadline sensitivity)
         urgency = 1.0 / max(task.max_delay, 0.1)
         
         # Resource multiplier
         resource_multiplier = 1.0 + 0.1 * resource_level  # 1.0 to 2.0
-        
-        cost = mec.base_price * urgency * resource_multiplier
+
+        # Scale cost with partial offloaded workload.
+        workload_cycles = task.size * task.cycles_per_bit
+        workload_scale = workload_cycles / 1e9  # normalized to giga-cycles
+
+        cost = mec.base_price * urgency * resource_multiplier * workload_scale
         return cost
     
     def _compute_aux_cost(self, aux: AuxVehicle, task: Task, resource_level: int) -> float:
         """
         Tính chi phí sử dụng auxiliary vehicle.
         
-        g_n = b_n * ln(1 + ε_n) * ω_m * g_n0
+        Partial AUX cost component:
+        g_n = b_n * ln(1 + ε_n) * ω_m * g_n0 * workload_n,
+        với workload_n = s_n * c_m và s_n = alpha_n * s_m.
         
         Ref: Eq 478 (paper)
         """
         urgency = 1.0 / max(task.max_delay, 0.1)
         load_factor = np.log(1 + aux.current_load)
         resource_multiplier = 1.0 + 0.1 * resource_level
-        
-        cost = aux.credibility * load_factor * urgency * aux.base_price * resource_multiplier
+
+        workload_cycles = task.size * task.cycles_per_bit
+        workload_scale = workload_cycles / 1e9  # normalized to giga-cycles
+
+        cost = (
+            aux.credibility * load_factor * urgency * aux.base_price *
+            resource_multiplier * workload_scale
+        )
         return cost
     
     # ==================== Reward Computation ====================
     
-    def _compute_reward(self, delay: float, energy: float, cost: float,
-                       deadline_violated: bool, task: Task) -> float:
+    def _compute_reward(self, delay: float, energy: float, cost: float, security_risk: float,
+                       secure_capacity: float, deadline_violated: bool, task: Task) -> float:
         """
         Tính reward dựa trên weighted combination.
         
@@ -564,13 +889,18 @@ class VehicularEdgeEnvironment(gym.Env):
         delay_norm = min(delay / task.max_delay, 1.0) if task.max_delay > 0 else 1.0
         energy_norm = min(energy / 10.0, 1.0)  # Assume max 10J per task
         cost_norm = min(cost / 5.0, 1.0)  # Assume max cost 5 units
+        security_norm = min(max(security_risk, 0.0), 1.0)
+        secure_capacity_norm = float(np.tanh(max(secure_capacity, 0.0)))
         
         # Weighted combination
         reward = -(
             self.config.weight_delay * delay_norm +
             self.config.weight_energy * energy_norm +
-            self.config.weight_cost * cost_norm
+            self.config.weight_cost * cost_norm +
+            self.config.weight_security * security_norm
         )
+
+        reward += self.config.weight_secure_capacity * secure_capacity_norm
         
         # Penalty for deadline violation
         if deadline_violated:
@@ -642,6 +972,15 @@ class VehicularEdgeEnvironment(gym.Env):
         
         # Dummy SNR (normalized)
         state_vector.append(0.5)
+
+        # Security context in state
+        if self.attack_vehicles:
+            d_min = min(user.get_distance(attacker) for attacker in self.attack_vehicles)
+            max_dist = np.sqrt(self.config.sim_area_x**2 + self.config.sim_area_y**2)
+            state_vector.append(min(d_min / max_dist, 1.0))
+        else:
+            state_vector.append(1.0)
+        state_vector.append(min(max(self.config.security_level, 0.0), 1.0))
         
         # Pad to match observation space
         while len(state_vector) < self.observation_space.shape[0]:
@@ -672,6 +1011,12 @@ class VehicularEdgeEnvironment(gym.Env):
             # Wrap around
             aux.position[0] = aux.position[0] % self.config.sim_area_x
             aux.position[1] = aux.position[1] % self.config.sim_area_y
+
+        # Attack vehicles move
+        for attacker in self.attack_vehicles:
+            attacker.step_mobility(dt=self.config.dt)
+            attacker.position[0] = attacker.position[0] % self.config.sim_area_x
+            attacker.position[1] = attacker.position[1] % self.config.sim_area_y
     
     def _generate_tasks(self):
         """
@@ -745,6 +1090,8 @@ class VehicularEdgeEnvironment(gym.Env):
             "avg_delay": float(np.mean([t["delay"] for t in tasks])),
             "avg_energy": float(np.mean([t["energy"] for t in tasks])),
             "avg_cost": float(np.mean([t["cost"] for t in tasks])),
+            "avg_security_risk": float(np.mean([t.get("security_risk", 0.0) for t in tasks])),
+            "avg_secure_capacity": float(np.mean([t.get("secure_capacity", 0.0) for t in tasks])),
             "deadline_violation_rate": float(np.mean([float(t["deadline_violated"]) for t in tasks])),
         }
         

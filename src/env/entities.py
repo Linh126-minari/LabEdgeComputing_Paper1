@@ -86,3 +86,24 @@ class AuxVehicle(ComputingNode):
         """
         price = (self.credibility * np.log(1 + self.current_load) * task_urgency * self.base_price)
         return price
+
+
+# --- Attack Vehicle ---
+@dataclass
+class AttackVehicle(ComputingNode):
+    """
+    Xe tấn công (gây nhiễu/nghe lén) ảnh hưởng tới offloading.
+    Attributes:
+        tx_power: Công suất gây nhiễu p_a
+        jamming_radius: Bán kính ảnh hưởng tấn công
+        mobility_model: Mô hình di chuyển
+    """
+    tx_power: float = 0.3
+    jamming_radius: float = 250.0
+    mobility_model: LinearMobility = field(default_factory=LinearMobility)
+
+    def step_mobility(self, dt=1.0):
+        """Cập nhật vị trí xe tấn công"""
+        # Giả định vận tốc cố định để tránh thêm nhiều biến trạng thái.
+        velocity = 18.0
+        self.position = self.mobility_model.step(self.position, velocity, dt)

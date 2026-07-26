@@ -1,0 +1,198 @@
+SYSTEM MODEL (PAPER-STYLE SUMMARY)
+
+1) Overall System and Entities
+
+We consider a vehicular edge computing (VEC) system with three computing tiers and one adversarial tier:
+- User Vehicles (UVs): generate computation tasks and decide offloading.
+- Auxiliary Vehicles (AVs): nearby helper vehicles supporting V2V offloading.
+- MEC Server(s): edge server(s) deployed at RSUs for high-capacity processing.
+- Attack Vehicles: mobile adversarial nodes causing jamming/eavesdropping risk.
+
+System set and notation:
+- U = {1, ..., M}: set of user vehicles.
+- A = {1, ..., N}: set of auxiliary vehicles.
+- J = {1, ..., K}: set of MEC servers (current default K = 1).
+- V_att = {1, ..., H}: set of attack vehicles.
+
+In the default scenario:
+- M = 10 users, N = 3 auxiliary vehicles, K = 1 MEC server, H = 2 attackers.
+- Simulation area is 2D (default 1000 m x 1000 m).
+- User speed is typically in [15, 25] m/s.
+- MEC coverage radius is about 300 m; V2V support is used for short range (e.g., <= 200 m).
+
+Each computing node has CPU frequency f (cycles/s):
+- User local CPU f_u.
+- Auxiliary vehicle CPU f_a.
+- MEC CPU f_j.
+
+2) Task Model and Task Characteristics
+
+Each user task tau_m is characterized by:
+- Input size s_m (bits).
+- Computation intensity c_m (cycles/bit).
+- Delay deadline t_m (seconds).
+
+Task generation model:
+- Task arrivals follow a Poisson process with rate lambda_task.
+- In the default setup: lambda_task = 0.5 tasks/s, c_m = 1000 cycles/bit, t_m = 1.0 s.
+- Task size usually lies in [100 KB, 1000 KB] (converted to bits for optimization).
+
+Task urgency:
+- Urgency is inversely related to deadline, i.e., omega_m ~ 1 / t_m.
+- Smaller t_m implies more urgent tasks and higher scheduling/offloading pressure.
+
+3) Communication Model
+
+Wireless transmission follows a Shannon-based rate model:
+- r(d) = B * log2(1 + SNR(d))
+- SNR(d) = p_tx * d^(-theta) * delta_0 / W_0
+where:
+- B is link bandwidth.
+- p_tx is transmit power.
+- theta is path-loss exponent.
+- delta_0 is channel gain coefficient.
+- W_0 is noise power.
+
+Two uplink classes are considered:
+- User-to-MEC (U2M): bandwidth B_mec (default about 1 MHz).
+- User-to-Auxiliary (V2V): bandwidth B_v2v (default about 0.8 MHz).
+
+Transmission delay:
+- t_up = s_m / r_eff for uplink.
+- For MEC mode, downlink is approximated similarly in baseline implementation.
+
+4) Security Model
+
+The framework includes both encryption overhead and attacker-induced risk.
+
+4.1 Encryption overhead
+- Encryption time:
+  t_enc = c_en * s_m / (f_u * sec_level)
+- Encryption energy:
+  E_enc = kappa * c_en * s_m * f_u^2 / sec_level
+where:
+- c_en is encryption overhead in cycles/bit (default 800).
+- sec_level in (0, 1] is normalized security level.
+- kappa is hardware energy coefficient.
+
+4.2 Attack success probability
+For each attacker i at distance d_i with jamming radius r_i:
+- p_i = sigmoid(alpha * (1 - d_i / r_i)) * exp(-beta * sec_level)
+Aggregate attack probability (OR fusion):
+- p_att = 1 - Product_i (1 - p_i)
+
+Interpretation:
+- Closer attacker (smaller d_i) increases p_i.
+- Higher sec_level decreases p_i via exponential damping.
+
+4.3 Effective communication/energy under attack
+Attack risk degrades rate and increases transmission energy:
+- r_eff = r_nom * (1 - eta_r * p_att)
+- E_tx,eff = E_tx * (1 + eta_e * p_att)
+where eta_r, eta_e are attack penalty factors.
+
+5) Offloading Model (Local, Auxiliary Support, MEC Server)
+
+At each decision epoch, the user selects one mode:
+- Local computing.
+- Offload to MEC server.
+- Offload to one auxiliary vehicle.
+
+5.1 Local mode
+- Delay:
+  t_local = (c_m * s_m) / f_u + t_enc
+- Energy (simplified baseline):
+  E_local ~ P_comp * (c_m * s_m / f_u)
+- Monetary service cost is usually 0 in local mode.
+
+5.2 MEC offloading mode
+If user is within MEC coverage:
+- Uplink delay t_up = s_m / r_eff.
+- MEC compute delay t_cmp,mec = (c_m * s_m) / f_alloc,mec.
+- Downlink delay t_down (baseline approximated similarly to uplink).
+- Total delay:
+  t_mec = t_up + t_cmp,mec + t_down + t_enc
+- Offloading energy:
+  E_mec = E_tx,eff + E_enc
+- Service cost depends on MEC base price, task urgency, and allocated resource level.
+If out of coverage, fallback to local mode.
+
+5.3 Auxiliary (support) offloading mode
+If user-aux distance is within V2V range:
+- Transmission delay t_v2v = s_m / r_eff,v2v.
+- Auxiliary compute delay t_cmp,aux = (c_m * s_m) / f_alloc,aux.
+- Total delay:
+  t_aux = t_v2v + t_cmp,aux + t_enc
+- Offloading energy:
+  E_aux = E_tx,eff + E_enc
+- Dynamic support price (load- and urgency-aware):
+  g_aux = b_aux * ln(1 + epsilon_aux) * omega_m * g_aux,0
+where b_aux is credibility and epsilon_aux is current helper load.
+If out of V2V range, fallback to local mode.
+
+5.4 Resource partition level
+The action includes a discrete resource level l in {0, ..., L-1} (default L=10),
+which maps to CPU/bandwidth allocation ratio from roughly 10% to 100% of available resources.
+
+6) MDP Formulation: State Space, Action Space, Objective Function
+
+6.1 State space S
+The state vector is normalized to [0, 1] and includes:
+- Task features: normalized task size, normalized deadline, urgency.
+- Topology features: distances from user to MEC(s) and to each auxiliary vehicle.
+- Resource features: utilization/load of MEC and auxiliary nodes.
+- Channel features: normalized transmission rate (and SNR proxy).
+- Security features: minimum distance to attackers, current security level.
+
+Hence, a generic state can be written as:
+- s_t = [task, distance, resource, channel, security]_t.
+
+6.2 Action space A
+Action is multi-discrete:
+- a_t = (o_t, l_t)
+where:
+- o_t is offloading target:
+  o_t = 0 (local),
+  o_t = 1 (MEC),
+  o_t = 2,3,... (auxiliary index).
+- l_t is resource level index in {0, ..., L-1}.
+
+6.3 Objective / reward design
+The immediate reward is security-aware multi-objective optimization:
+- r_t = - (w_d * D_t + w_e * E_t + w_c * C_t + w_s * R_sec,t) - Penalty_deadline + Bonus
+with normalized terms:
+- D_t: normalized delay.
+- E_t: normalized energy.
+- C_t: normalized monetary cost.
+- R_sec,t: normalized security risk (linked to p_att).
+
+Deadline handling:
+- If D_t > t_m, a large penalty is applied.
+- If deadline is met, a positive bonus can be granted.
+
+Long-term DRL objective:
+- maximize expected discounted return
+  J = E[ Sum_{t=0..T} gamma^t * r_t ]
+which is equivalent to minimizing long-term weighted delay-energy-cost-security risk under constraints.
+
+7) Constraint Set (Conceptual)
+
+Typical constraints represented by the environment/solver include:
+- Coverage/range constraints:
+  user must be in MEC coverage or V2V range for corresponding offloading.
+- Resource constraints:
+  allocated CPU and bandwidth cannot exceed currently available capacities.
+- Deadline constraints:
+  total execution delay should satisfy per-task delay threshold when feasible.
+- Feasibility constraints:
+  offloading ratio/allocation variables stay within valid bounds.
+
+8) Interpretation and Practical Meaning
+
+This system model captures the key trade-offs in secure vehicular offloading:
+- Low delay pushes tasks to high-rate/high-CPU nodes.
+- Low energy may favor local execution or short-distance V2V.
+- Low monetary cost may favor auxiliary support over MEC in some contexts.
+- High security requires balancing encryption overhead and attack risk.
+
+Therefore, optimal decisions are context-dependent and time-varying; DRL is used to learn adaptive offloading policies over dynamic mobility, channel, load, and attacker conditions.

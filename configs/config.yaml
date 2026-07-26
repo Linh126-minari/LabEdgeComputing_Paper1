@@ -11,6 +11,11 @@ general:
   random_seed: 42              # Để tái lập kết quả (Reproducibility)
   device: "cuda"               # Hoặc "cpu"
   verbose: true                # In log chi tiết
+  weight_delay: 1.0
+  weight_energy: 0.5
+  weight_cost: 0.3
+  weight_security: 0.4
+  weight_penalty: 100.0
 
 # Quản lý đường dẫn (như đã thảo luận trước đó)
 paths:
