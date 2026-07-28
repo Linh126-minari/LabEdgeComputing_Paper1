@@ -29,17 +29,19 @@ def test_environment():
     print(f"   State space: {env.observation_space}")
     print(f"   Action space: {env.action_space}")
     
-    # Test reset
-    state = env.reset()
+    # Test reset (Gymnasium API — T1.4)
+    state, info = env.reset(seed=42)
     print(f"✅ Environment reset, state shape: {state.shape}")
-    
+    print(f"   Action mask: {info['action_mask'].sum()}/{info['action_mask'].size} khả thi")
+
     # Test step
     action = env.action_space.sample()
-    state, reward, done, info = env.step(action)
+    state, reward, terminated, truncated, info = env.step(action)
     print(f"✅ Step executed")
-    print(f"   Reward: {reward:.4f}")
-    print(f"   Done: {done}")
-    print(f"   Info: {info}")
+    print(f"   Reward: {reward:.4f} (cents)")
+    print(f"   Terminated/Truncated: {terminated}/{truncated}")
+    print(f"   Elapsed time: {info['elapsed_time']:.2f}s (semi-MDP)")
+    print(f"   tau_eff: {info['tau_eff']:.3f}s")
     
     # Test get_metrics
     metrics = env.get_metrics()

@@ -1,0 +1,46 @@
+# configs/agent/lagrangian_dqn.yaml
+#
+# T1.3 — Constrained RL: Dueling + Double DQN với Lagrangian relaxation.
+# Ràng buộc (23e) của [A] và (C2),(C3) của [B] xử lý bằng multiplier HỌC ĐƯỢC
+# thay cho penalty tay λ_p = 100.
+#
+# Dùng: python train.py agent=lagrangian_dqn
+# (train.py sẽ tự đặt env penalty_mode="external")
+#
+# Baseline so sánh bắt buộc (T1.3 bước 5): agent=dueling_dqn với
+# general.deadline_penalty ∈ {1, 10, 100} (penalty_mode="fixed").
+
+name: "LagrangianDQN"
+algo: "Lagrangian-DDRP"
+
+hyperparameters:
+  learning_rate: 0.001
+  gamma: 0.95
+  batch_size: 64
+  buffer_size: 100000
+  learning_starts: 2000
+
+  use_double_dqn: true
+  use_soft_update: false
+  tau: 0.005
+
+  epsilon_schedule: "linear"
+  exploration_fraction: 0.3
+  epsilon_start: 1.0
+  epsilon_end: 0.01
+  epsilon_decay: 0.995
+
+  hidden_size: 256
+  target_update_freq: 100
+
+  alpha_levels: 10
+  action_levels: 10
+
+  # --- Lagrangian (T1.3) ---
+  lambda_T_init: 1.0        # multiplier deadline khởi tạo
+  lambda_E_init: 1.0        # multiplier energy khởi tạo
+  lambda_lr: 0.05           # lr_λ << lr_policy (dual ascent chậm hơn policy)
+  lambda_max: 100.0
+  delta_T: 0.05             # chấp nhận 5% vi phạm deadline
+  delta_E: 0.0              # không chấp nhận vượt E_max trung bình
+  multiplier_update_interval: 10   # K — cập nhật mỗi K episode

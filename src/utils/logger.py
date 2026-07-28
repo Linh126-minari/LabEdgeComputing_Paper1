@@ -2,6 +2,7 @@
 Simple Logger utility for the project
 """
 
+import sys
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +23,19 @@ class Logger:
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
         
+        # Ensure stdout/stderr handle UTF-8 cleanly on Windows
+        if sys.platform == "win32":
+            if hasattr(sys.stdout, "reconfigure"):
+                try:
+                    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+                except Exception:
+                    pass
+            if hasattr(sys.stderr, "reconfigure"):
+                try:
+                    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+                except Exception:
+                    pass
+
         # Create logger
         self.logger = logging.getLogger(name)
         self.logger.setLevel(logging.INFO)
@@ -30,7 +44,7 @@ class Logger:
         self.logger.handlers.clear()
         
         # Console handler
-        console_handler = logging.StreamHandler()
+        console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.INFO)
         console_format = logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -41,7 +55,7 @@ class Logger:
         
         # File handler
         log_file = self.log_dir / f"{name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-        file_handler = logging.FileHandler(log_file)
+        file_handler = logging.FileHandler(log_file, encoding='utf-8')
         file_handler.setLevel(logging.INFO)
         file_handler.setFormatter(console_format)
         self.logger.addHandler(file_handler)

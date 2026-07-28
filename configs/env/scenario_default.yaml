@@ -1,80 +1,102 @@
 # configs/env/scenario_default.yaml
+#
+# QUY TẮC (T0.1): file này KHÔNG chứa giá trị số nào.
+# Mọi giá trị tham chiếu tới configs/params_master.yaml (single source of truth)
+# qua Hydra/OmegaConf interpolation.
 
-# Thông tin chung về kịch bản (Base Scenario from Paper)
 name: "Reproduce_Paper_Fig9"
-description: "Scenario with 10 users, 3 AVs, 1 MEC as described in Section 6"
+description: "Scenario 10 users, 1 MEC, 3 AVs theo [A] Section 6 / Fig.3"
 
 # Flattened keys used directly by create_env_config
-num_users: 10
-num_mec_servers: 1
-num_auxiliary_vehicles: 3
-num_attack_vehicles: 2
-task_arrival_rate: 0.5
-task_size_min: 100
-task_size_max: 1000
-task_cycles_per_bit: 1000
-task_deadline: 1.0
-dt: 0.1
-episode_length: 1000
+num_users: ${num_users.value}
+num_mec_servers: ${num_mec_servers.value}
+num_auxiliary_vehicles: ${num_auxiliary_vehicles.value}
+num_attack_vehicles: ${num_attack_vehicles.value}
+sim_area_x: ${sim_area_x.value}
+sim_area_y: ${sim_area_y.value}
+task_arrival_rate: ${task_arrival_rate.value}
+task_size_min: ${task_size_min.value}
+task_size_max: ${task_size_max.value}
+task_cycles_per_bit: ${task_cycles_per_bit.value}
+task_deadline: ${task_deadline_app.value}
+dt: ${dt.value}
+episode_length: ${episode_length.value}
+v2v_range: ${v2v_range.value}
 
-simulation:
-  duration: 100          # Số bước thời gian (time steps) mỗi episode
-  num_episodes: 500      # Tổng số episode huấn luyện
+mec_cpu_frequency: ${mec_cpu_frequency.value}
+aux_cpu_frequency: ${aux_cpu_frequency.value}
+user_cpu_frequency: ${user_cpu_frequency.value}
 
-# 1. Thông số Mạng & Kênh truyền 
+# (Đã bỏ khối `simulation:` — trùng lặp với general.num_episodes / episode_length
+#  và không được code nào đọc. Nguyên tắc T0.1: một con số một chỗ.)
+
 channel:
-  bandwidth_mec: 1.0e6   # B = 1 MHz
-  bandwidth_v2v: 0.8e6   # B_V2V = 0.8 MHz
-  noise_power: 3.0e-13   # W0 = 3e-13 W
-  channel_gain: 1.0e-13  # delta_0 = 1e-13
-  path_loss_exp: 4       # theta = 4
+  bandwidth_mec: ${bandwidth_mec.value}
+  bandwidth_v2v: ${bandwidth_v2v.value}
+  noise_power: ${noise_power.value}
+  channel_gain: ${channel_ref_gain.value}
+  ref_distance: ${channel_ref_distance.value}
+  path_loss_exp: ${path_loss_exponent.value}
 
-# 2. Thông số MEC Server 
 mec_server:
-  count: 1
-  coverage_radius: 300.0 # L = 300m
-  cpu_frequency: 1.0e9   # f_j = 1 GHz
-  base_price: 1.0        # g_j0 (cents/cycle - giả định chuẩn hóa)
-  credibility: 0.9       # b_j (độ tin cậy cao)
+  count: ${num_mec_servers.value}
+  coverage_radius: ${mec_coverage_radius.value}
+  curb_distance: ${curb_distance.value}
+  cpu_frequency: ${mec_cpu_frequency.value}
+  base_price: ${mec_base_price.value}
+  credibility: ${mec_credibility.value}
+  bandwidth_pool: ${mec_bandwidth_pool.value}
 
-# 3. Thông số User Vehicles 
 users:
-  count: 10              # M = 10 users
-  velocity_min: 15.0     # 15 m/s
-  velocity_max: 25.0     # 25 m/s
-  tx_power: 0.2          # p_m = 0.2 W
-  idle_power: 0.05       # p_w = 0.05 W
-  
-  # Task parameters
-  task_size_min: 102400  # 100 kb (bits) 
-  task_size_max: 1024000 # 1000 kb (bits)
-  cycles_per_bit: 1000   # c_m = 1000 cycles/bit 
-  max_delay: 1.0         # t_m (s) - ngưỡng trễ tối đa
-  
-  # Economic params 
-  price_energy_local: 1.0 # lambda_l = 1 cents/J
+  count: ${num_users.value}
+  velocity_min: ${velocity_min.value}
+  velocity_max: ${velocity_max.value}
+  tx_power: ${tx_power.value}
+  idle_power: ${idle_power.value}
+  task_size_min: ${task_size_min.value}
+  task_size_max: ${task_size_max.value}
+  cycles_per_bit: ${task_cycles_per_bit.value}
+  max_delay: ${task_deadline_app.value}
+  price_energy_local: ${price_energy_local.value}
 
-# 4. Thông số Auxiliary Vehicles (AV) 
 aux_vehicles:
-  count: 3               # N = 3 AVs
-  cpu_frequency: 0.5e9   # f_n = 0.5 GHz
-  base_price: 0.5        # g_n0 (thấp hơn MEC để cạnh tranh)
-  credibility: 0.8       # b_n
-  price_energy_av: 0.8   # lambda_n = 0.8 cents/J 
+  count: ${num_auxiliary_vehicles.value}
+  cpu_frequency: ${aux_cpu_frequency.value}
+  base_price: ${aux_base_price.value}
+  credibility: ${aux_credibility.value}
+  price_energy_av: ${price_energy_av.value}
+  bandwidth_pool: ${aux_bandwidth_pool.value}
 
-# Mô hình di chuyển
 mobility:
   type: "linear"         # linear hoặc sumo
 
-# 5. Attack vehicle model
+# Mô hình attacker theo [B] Eq(5)-(9) — kỳ vọng mật độ, KHÔNG dựa trên thực thể
+# (T0.2, T0.9). num_attack_vehicles chỉ để minh họa.
 attack:
-  count: 2
-  tx_power: 0.3
-  jamming_radius: 250.0
-  rate_penalty: 0.35
-  energy_penalty: 0.45
-  density: 2.0e-6
-  lane_count: 3
-  road_max_speed_mps: 25.0
-  frame_length_bits: 8192
-  encryption_block_length_bits: 2048
+  count: ${num_attack_vehicles.value}
+  density: ${attacker_density.value}
+  lane_count: ${lane_count.value}
+  road_max_speed_mps: ${road_max_speed.value}
+  frame_length_bits: ${block_cipher_frame_length.value}
+  encryption_block_length_bits: ${block_cipher_block_length.value}
+  security_range_v2i: ${security_range_v2i.value}
+  security_range_v2v: ${security_range_v2v.value}
+
+# T1.1 — deadline động
+deadline:
+  floor: ${deadline_floor.value}
+  urgency_cap: ${urgency_cap.value}
+
+# T1.2/T1.3 — ràng buộc & penalty
+constraints:
+  energy_budget_max: ${energy_budget_max.value}
+  penalty_mode: "fixed"          # "fixed" (baseline) | "external" (Lagrangian T1.3)
+  deadline_penalty: ${deadline_penalty.value}
+  energy_violation_penalty: ${energy_violation_penalty.value}
+
+# T1.5 — đa user: users[1:] chạy Algorithm 1 của [A], chiếm tài nguyên thật
+background:
+  users_enabled: true            # Mức 2 (khuyến nghị)
+  alpha_l: 0.5                   # T2.2 bước 3
+  resource_level: 4
+  load_enabled: false            # Mức 1 (chỉ khi users_enabled=false)

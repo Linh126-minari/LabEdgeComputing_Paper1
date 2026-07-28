@@ -1,0 +1,397 @@
+# =============================================================================
+# params_master.yaml — SINGLE SOURCE OF TRUTH cho mọi tham số vật lý
+# =============================================================================
+# Quy tắc (T0.1):
+#   - Mọi con số CHỈ tồn tại ở file này. Các config khác tham chiếu, không lặp lại.
+#   - Mỗi entry có 4 field: value / unit / source / note.
+#   - source = "[A] ..." hoặc "[B] ..." nếu lấy từ bài gốc;
+#     source = "Extension (not in [A]/[B])" nếu do dự án tự đặt.
+#   - Bảng LaTeX trong .tex được sinh tự động bằng scripts/gen_param_table.py.
+#
+# QUY ƯỚC NGÔN NGỮ (bắt buộc — scripts/gen_param_table.py sẽ báo lỗi nếu vi phạm):
+#   - `unit` và `source` phải là ASCII tiếng Anh, vì chúng được xuất trực tiếp
+#     vào bảng LaTeX của bài báo (pdflatex + inputenc utf8 không xử lý được dấu
+#     tiếng Việt mà không thêm package).
+#   - `note` là nơi ghi giải thích/tiếng Việt cho nhóm; KHÔNG được xuất ra .tex.
+#
+# LƯU Ý YAML: luôn viết số khoa học có dấu ở số mũ (1.0e+9 chứ không phải 1.0e9).
+#   PyYAML chuẩn parse "1.0e9" thành CHUỖI, không phải float.
+#
+# Nguồn:
+#   [A] Xue, Yao, Wang — Ad Hoc Networks 161 (2024) 103545
+#   [B] Xiao et al. — IEEE TWC 22(12), 2023
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Topology / scenario
+# ---------------------------------------------------------------------------
+num_users:
+  value: 10
+  unit: "vehicles"
+  source: "[A] Fig.3"
+  note: "U=10 user vehicles (chốt theo [A], sửa .tex từ 5 -> 10)"
+
+num_mec_servers:
+  value: 1
+  unit: "servers"
+  source: "[A] Fig.3"
+  note: "J=1 MEC server (chốt theo [A], sửa .tex từ 2 -> 1)"
+
+num_auxiliary_vehicles:
+  value: 3
+  unit: "vehicles"
+  source: "[A] Fig.3"
+  note: "N=3 auxiliary vehicles"
+
+num_attack_vehicles:
+  value: 2
+  unit: "vehicles"
+  source: "Extension (not in [A]/[B])"
+  note: "Chỉ dùng để minh họa/hình vẽ. KHÔNG tham gia tính toán bảo mật sau T0.9; mô hình attacker dùng kỳ vọng mật độ [B] Eq(8). Xem T3.2."
+
+sim_area_x:
+  value: 1000.0
+  unit: "m"
+  source: "Extension (not in [A]/[B])"
+  note: "Kích thước vùng mô phỏng"
+
+sim_area_y:
+  value: 1000.0
+  unit: "m"
+  source: "Extension (not in [A]/[B])"
+  note: "Kích thước vùng mô phỏng"
+
+# ---------------------------------------------------------------------------
+# 2. Mobility
+# ---------------------------------------------------------------------------
+velocity_min:
+  value: 15.0
+  unit: "m/s"
+  source: "[A] Section 6"
+  note: "Vận tốc user vehicle tối thiểu"
+
+velocity_max:
+  value: 25.0
+  unit: "m/s"
+  source: "[A] Section 6"
+  note: "Chọn 25 m/s theo [A]; [B] Table I dùng 24 m/s — ghi chú trong bài"
+
+lane_count:
+  value: 8
+  unit: "lanes"
+  source: "[B] Table I"
+  note: "N_l = 8 làn (quyết định 26/07/2026: theo [B] để nhất quán bộ tham số bảo mật; scenario cũ dùng 3)"
+
+road_max_speed:
+  value: 25.0
+  unit: "m/s"
+  source: "[A] Section 6"
+  note: "v_max trong gamma = N_l/(3 v_max) của [B] Eq(8). [B] dùng 24; ta dùng 25 nhất quán với velocity_max của [A]. gamma = 8/75 = 0.1067"
+
+# ---------------------------------------------------------------------------
+# 3. Task model
+# ---------------------------------------------------------------------------
+task_size_min:
+  value: 102400
+  unit: "bits (=100 kbit)"
+  source: "[A] Section 6"
+  note: "'the task size is between 100 kb and 1000 kb' — kilobit. [B] dùng [100,900] KB (kilobyte) — nếu chạy theo [B] thì làm scenario riêng"
+
+task_size_max:
+  value: 1024000
+  unit: "bits (=1000 kbit)"
+  source: "[A] Section 6"
+  note: "Xem task_size_min"
+
+task_cycles_per_bit:
+  value: 1000
+  unit: "cycles/bit"
+  source: "[A] Section 6"
+  note: "c_m = 1000 cycles/bit"
+
+task_deadline_app:
+  value: 1.0
+  unit: "s"
+  source: "[A] Section 6"
+  note: "Deadline ứng dụng tau_app. Từ T1.1 deadline hiệu dụng = min(tau_app, thời gian lưu trú)"
+
+task_arrival_rate:
+  value: 0.5
+  unit: "tasks/s"
+  source: "[A] Section 6"
+  note: "Poisson arrival (chốt Poisson theo [A], sửa .tex khỏi Bernoulli)"
+
+# ---------------------------------------------------------------------------
+# 4. Computation resources
+# ---------------------------------------------------------------------------
+mec_cpu_frequency:
+  value: 1.0e+9
+  unit: "Hz"
+  source: "[A] Section 6"
+  note: "Paper A: 'The computational power of the MEC server is 1 GHz'. .tex ghi 10 GHz là SAI -> sửa .tex"
+
+aux_cpu_frequency:
+  value: 0.5e+9
+  unit: "Hz"
+  source: "[A] Section 6"
+  note: "f_n = 0.5 GHz. .tex ghi 5 GHz là SAI -> sửa .tex"
+
+user_cpu_frequency:
+  value: 2.0e+9
+  unit: "Hz"
+  source: "Extension (not in [A]/[B])"
+  note: "f_u = 2 GHz — giá trị dự án chọn, cần đối chiếu lại với [A] khi viết bài"
+
+kappa_effective_capacitance:
+  value: 1.0e-27
+  unit: "W s^3 / cycles^3"
+  source: "Extension (not in [A]/[B])"
+  note: "Hệ số kappa trong E = kappa·c·s·f^2 (giá trị phổ biến trong văn liệu MEC)"
+
+# ---------------------------------------------------------------------------
+# 5. Communication / channel
+# ---------------------------------------------------------------------------
+bandwidth_mec:
+  value: 1.0e+6
+  unit: "Hz"
+  source: "[A] Section 6"
+  note: "B = 1 MHz cho uplink V2I"
+
+bandwidth_v2v:
+  value: 0.8e+6
+  unit: "Hz"
+  source: "[A] Section 6"
+  note: "B_V2V = 0.8 MHz"
+
+noise_power:
+  value: 3.0e-13
+  unit: "W"
+  source: "[A] Section 6"
+  note: "W0 = 3e-13 W"
+
+tx_power:
+  value: 0.2
+  unit: "W"
+  source: "[A] Section 6"
+  note: "p_m = 0.2 W công suất phát của user vehicle"
+
+idle_power:
+  value: 0.05
+  unit: "W"
+  source: "[A] Section 6"
+  note: "p_w = 0.05 W — 'the idle power is 0.05 W'. Dùng cho E^w (T0.6)"
+
+path_loss_exponent:
+  value: 4
+  unit: "-"
+  source: "[A] Section 6"
+  note: "theta = 4"
+
+channel_ref_distance:
+  value: 1.0
+  unit: "m"
+  source: "Extension (not in [A]/[B])"
+  note: "d0 — [A] KHÔNG định nghĩa khoảng cách tham chiếu cho delta_0, khiến bộ tham số gốc cho SNR ~ 0 ở d >= 100 m. Ta khai báo tường minh d0 = 1 m (T0.5)"
+
+channel_ref_gain:
+  value: 4.75e-2
+  unit: "- (path gain at d0)"
+  source: "Extension (recalibrated from [A])"
+  note: "delta_0 hiệu chỉnh bằng scripts/calibrate_channel.py sao cho SNR(100m) ~ 25 dB, SNR(300m) ~ 6 dB, rate(100m, B=1MHz) ~ 8 Mbps. Giá trị gốc 1e-13 của [A] không nhất quán đơn vị (T0.5)"
+
+mec_coverage_radius:
+  value: 300.0
+  unit: "m"
+  source: "[A] Section 6"
+  note: "L = 300 m bán kính phủ sóng RSU/MEC"
+
+curb_distance:
+  value: 20.0
+  unit: "m"
+  source: "Extension (not in [A]/[B])"
+  note: "z trong [A] Eq(6) — khoảng cách RSU tới lề đường; [A] không cho giá trị số (T1.1)"
+
+security_range_v2i:
+  value: 200.0
+  unit: "m"
+  source: "Extension (calibrated, T1.7)"
+  note: "d_i ([B] Eq(8)) cho liên kết V2I — bán kính vùng phát của xe gửi. Hiệu chỉnh T1.7: n^e = 1.34, p_att = 0.61 (vùng không suy biến của Eq(39))"
+
+security_range_v2v:
+  value: 150.0
+  unit: "m"
+  source: "Extension (calibrated, T1.7)"
+  note: "d_i cho liên kết V2V. Hiệu chỉnh T1.7: n^e = 0.75, p_att = 0.41 — nằm trong vùng có nghĩa [0.52, 0.84] của nghiệm đóng [B] Eq(39). Xem scripts/calibrate_security.py"
+
+deadline_floor:
+  value: 0.05
+  unit: "s"
+  source: "Extension (not in [A]/[B])"
+  note: "Sàn của deadline hiệu dụng tau_eff (T1.1) để tránh chia 0 khi xe sắp rời vùng phủ"
+
+urgency_cap:
+  value: 3.0
+  unit: "-"
+  source: "Extension (not in [A]/[B])"
+  note: "Chặn omega = 1/tau trong định giá exp(omega) của [A] §3.5. [A] chỉ xét tau = 1 s; với deadline động tau → 0.05 s thì exp(1/tau) = e^20 làm giá phát nổ (T1.1)"
+
+v2v_range:
+  value: 200.0
+  unit: "m"
+  source: "Extension (not in [A]/[B])"
+  note: "Tầm liên kết V2V; đồng thời là bán kính vùng phát d_i của người gửi trong [B] Eq(8) cho nhánh V2V"
+
+mec_bandwidth_pool:
+  value: 1.0e+7
+  unit: "bit/s"
+  source: "Extension (not in [A]/[B])"
+  note: "Tổng băng thông khả dụng tại MEC cho cấp phát tài nguyên"
+
+aux_bandwidth_pool:
+  value: 5.0e+6
+  unit: "bit/s"
+  source: "Extension (not in [A]/[B])"
+  note: "Tổng băng thông khả dụng tại AUX"
+
+# ---------------------------------------------------------------------------
+# 6. Security — hệ HAI LỚP (quyết định 26/07/2026, T0.3 Phương án 1):
+#    Lớp 1: Mã hóa đồng cấu Paillier [A] — bảo vệ nội dung khỏi MEC server tò mò
+#    Lớp 2: Mã khối đối xứng lớp liên kết [B] — bảo vệ khỏi eavesdropper trên kênh
+#    -> hợp nhất hai mô hình đe dọa; là một luận điểm novelty, cần đoạn giải thích trong bài
+# ---------------------------------------------------------------------------
+homomorphic_key_length:
+  value: 1024
+  unit: "bits"
+  source: "[A] Section 3.3"
+  note: "Độ dài khóa Paillier. KHÔNG được dùng làm block length trong công thức của [B] (lỗi cũ N_i=2048 đến từ đây)"
+
+homomorphic_cycles_per_bit:
+  value: 800
+  unit: "cycles/bit"
+  source: "[A] Section 6"
+  note: "c^en_m — chi phí mã hóa Paillier tại user vehicle"
+
+block_cipher_frame_length:
+  value: 64
+  unit: "bits"
+  source: "[B] Table I"
+  note: "N_f = 64 — maximum block length của mã khối đối xứng. Lỗi cũ: 8192"
+
+block_cipher_block_length:
+  value: 32
+  unit: "bits"
+  source: "Extension (decision variable, valid range (0, N_f])"
+  note: "N_i — block length thực dùng; [B] coi là biến tối ưu. Đặt 32 làm mặc định; trở thành action từ T3.1. Lỗi cũ: 2048 (nhầm với khóa Paillier)"
+
+block_cipher_cycles_per_bit:
+  value: 90
+  unit: "cycles/bit"
+  source: "[B] Table I"
+  note: "q^en_i — chi phí mã hóa khối"
+
+encryption_total_cycles_per_bit:
+  value: 890
+  unit: "cycles/bit"
+  source: "[A] Section 6 + [B] Table I"
+  note: "Hệ hai lớp: c_en tổng = 800 (Paillier [A]) + 90 (block cipher [B]) = 890 cycles/bit"
+
+attacker_density:
+  value: 1.0e-4
+  unit: "vehicles/vehicle (ratio, not per m^2)"
+  source: "[B] Table I"
+  note: "rho = 1e-4 — TỈ LỆ attacker trên tổng số xe. Lỗi cũ hiểu nhầm thành mật độ không gian (sai 50 lần). Ref [B] Eq(8): n^e_i = pi d_i^2 rho gamma, gamma = N_l/(3 v_max); d_i là bán kính vùng phát của NGƯỜI GỬI"
+
+varpi_1:
+  value: 1.0e-5
+  unit: "-"
+  source: "[B] Table I"
+  note: "Hệ số scale secure information capacity U trong reward (thay cho tanh — T0.8). [B]: varpi_1 thuộc [0,1]x1e-5"
+
+energy_budget_max:
+  value: 0.4
+  unit: "J"
+  source: "[B] Table I"
+  note: "E_max — ngân sách năng lượng mỗi task (ràng buộc C3 của [B]; dùng từ T1.2)"
+
+# ---------------------------------------------------------------------------
+# 7. Pricing / economics ([A] Section 3.5, Section 6)
+# ---------------------------------------------------------------------------
+price_energy_local:
+  value: 1.0
+  unit: "cents/J"
+  source: "[A] Section 6"
+  note: "lambda^l = 1 cents/J — quy đổi năng lượng local thành tiền"
+
+price_energy_av:
+  value: 0.8
+  unit: "cents/J"
+  source: "[A] Section 6"
+  note: "lambda^n = 0.8 cents/J"
+
+mec_base_price:
+  value: 1.0
+  unit: "cents (normalized)"
+  source: "Extension (not in [A]/[B])"
+  note: "g_j0 — giá cơ sở MEC, [A] không cho giá trị số cụ thể"
+
+aux_base_price:
+  value: 0.5
+  unit: "cents (normalized)"
+  source: "Extension (not in [A]/[B])"
+  note: "g_n0 — giá cơ sở AUX"
+
+mec_credibility:
+  value: 0.9
+  unit: "- [0,1]"
+  source: "Extension (not in [A]/[B])"
+  note: "b_j — độ tin cậy MEC trong công thức giá [A] §3.5"
+
+aux_credibility:
+  value: 0.8
+  unit: "- [0,1]"
+  source: "Extension (not in [A]/[B])"
+  note: "b_n — độ tin cậy AUX"
+
+cost_normalization_divisor:
+  value: 1.0e+9
+  unit: "cycles"
+  source: "Extension (not in [A]/[B])"
+  note: "Hệ số chuẩn hóa workload sang giga-cycles trong công thức cost, để cost nằm trong dải [0, C_max] (T0.7 bước 4)"
+
+resource_multiplier_step:
+  value: 0.1
+  unit: "-"
+  source: "Extension (not in [A]/[B])"
+  note: "lambda_res = 1 + 0.1·level — hệ số giá theo mức tài nguyên, không có trong [A] (T0.7 bước 4)"
+
+# ---------------------------------------------------------------------------
+# 8. Objective & constraints (T1.2 — Phương án 1; T1.3 — Constrained RL)
+#    Weighted-sum 5 trọng số cũ ĐÃ BỎ: reward = −(C_u − ϖ₁·U_u) [cents] theo
+#    [A] Eq(22) + [B] Eq(9); deadline/energy là RÀNG BUỘC.
+# ---------------------------------------------------------------------------
+deadline_penalty:
+  value: 5.0
+  unit: "cents/violation"
+  source: "Extension (not in [A]/[B])"
+  note: "lambda_p TẠM cho penalty_mode=fixed (T1.2 bước 4: hạ từ 100 xuống [2,10]); bị thay hoàn toàn bởi Lagrangian multiplier học được (T1.3, penalty_mode=external)"
+
+energy_violation_penalty:
+  value: 5.0
+  unit: "cents/J"
+  source: "Extension (not in [A]/[B])"
+  note: "Penalty cho max(0, E - E_max) khi penalty_mode=fixed; thay bởi lambda_E học được (T1.3)"
+
+# ---------------------------------------------------------------------------
+# 9. Simulation
+# ---------------------------------------------------------------------------
+dt:
+  value: 0.1
+  unit: "s"
+  source: "Extension (not in [A]/[B])"
+  note: "Bước thời gian mô phỏng"
+
+episode_length:
+  value: 1000
+  unit: "steps"
+  source: "Extension (not in [A]/[B])"
+  note: "Số bước tối đa mỗi episode"

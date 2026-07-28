@@ -7,9 +7,12 @@ class CMSOSolver:
     Convex sub-problem solver for local/offloading split.
 
     This version integrates:
-    - attacker vehicles via aggregated attack probability,
-    - security-level dependent encryption overhead,
-    - effective transmission-rate and transmission-energy penalties.
+    - attacker model của [B] Eq(5)-(9) (kỳ vọng mật độ, eavesdropping thụ động),
+    - security-level dependent encryption overhead.
+
+    T0.9: các hệ số η_r, η_e (suy giảm rate / khuếch đại năng lượng do tấn công)
+    đã bị xóa — không có trong [A]/[B]; eavesdropping thụ động không gây suy
+    giảm kênh. Mô hình jamming là mở rộng riêng — xem T3.2.
     """
 
     def _get_param(self, source, key, idx=None, default=None):
@@ -24,26 +27,26 @@ class CMSOSolver:
 
     def _attack_probability(self, security_params):
         """
-        Paper attacker model (Eq. 6-8):
-        - n_i^e = pi * d_i^2 * rho * (N_l / (3 * v_max))
-        - S_i = (N_i / N_f)^(n_i^e)
+        Attacker model theo [B] Eq(6)-(8):
+        - n_i^e = pi * d_i^2 * rho * gamma, gamma = N_l / (3 * v_max)   [B] Eq(8)
+        - S_i = (N_i / N_f)^(n_i^e)                                     [B] Eq(7)
         - p_att = 1 - S_i
+
+        T0.2: rho là TỈ LỆ attacker/xe ([B] Table I: 1e-4); d_i là bán kính
+        vùng phát của người gửi. n^e là KỲ VỌNG — không chặn bằng số attacker
+        mô phỏng (đã xóa nhánh num_attackers).
         """
-        n_f = max(float(self._get_param(security_params, "frame_length_bits", default=8192.0)), 1.0)
-        n_i = float(self._get_param(security_params, "block_length_bits", default=2048.0))
+        n_f = max(float(self._get_param(security_params, "frame_length_bits", default=64.0)), 1.0)
+        n_i = float(self._get_param(security_params, "block_length_bits", default=32.0))
         n_i = float(np.clip(n_i, 1.0, n_f))
 
-        d_i = max(float(self._get_param(security_params, "coverage_radius", default=250.0)), 0.0)
-        rho = max(float(self._get_param(security_params, "attacker_density", default=2e-6)), 0.0)
-        n_l = max(float(self._get_param(security_params, "lane_count", default=3.0)), 1e-6)
+        d_i = max(float(self._get_param(security_params, "coverage_radius", default=200.0)), 0.0)
+        rho = max(float(self._get_param(security_params, "attacker_density", default=1e-4)), 0.0)
+        n_l = max(float(self._get_param(security_params, "lane_count", default=8.0)), 1e-6)
         v_max = max(float(self._get_param(security_params, "road_max_speed_mps", default=25.0)), 1e-6)
 
         gamma = n_l / (3.0 * v_max)
         n_attackers = float(np.pi * (d_i ** 2) * rho * gamma)
-
-        num_attackers = self._get_param(security_params, "num_attackers", default=None)
-        if num_attackers is not None:
-            n_attackers = min(n_attackers, max(float(num_attackers), 0.0))
 
         security_strength = float(np.clip((n_i / n_f) ** max(n_attackers, 0.0), 0.0, 1.0))
         return float(np.clip(1.0 - security_strength, 0.0, 1.0))
@@ -56,10 +59,9 @@ class CMSOSolver:
         - task_params: size_bits, cycles_per_bit, deadline_s, enc_cycles_per_bit
         - user_params: cpu_freq, lambda_local, lambda_offload, tx_power, wait_power, kappa
         - av_params: cpu_freq, uplink_rate, service_price
-                - security_params: security_level, attack_rate_penalty, attack_energy_penalty,
-                    frame_length_bits, block_length_bits, coverage_radius, attacker_density,
-                    lane_count, road_max_speed_mps, num_attackers, security_risk_weight,
-                    secure_capacity_weight
+        - security_params: security_level, frame_length_bits, block_length_bits,
+            coverage_radius, attacker_density, lane_count, road_max_speed_mps,
+            security_risk_weight, secure_capacity_weight
         """
         _ = prices
 
@@ -82,7 +84,7 @@ class CMSOSolver:
         kappa = float(self._get_param(user_params, "kappa", default=1e-27))
 
         # AV/MEC node parameters
-        f_n = max(float(self._get_param(av_params, "cpu_freq", idx=0, default=10e9)), 1.0)
+        f_n = max(float(self._get_param(av_params, "cpu_freq", idx=0, default=0.5e9)), 1.0)  # f_n = 0.5 GHz [A] §6
         r_up_nom = max(float(self._get_param(av_params, "uplink_rate", idx=1, default=1e6)), 1.0)
         g_n = float(self._get_param(av_params, "service_price", idx=2, default=0.0))
 
@@ -90,17 +92,17 @@ class CMSOSolver:
         if security_params is None:
             security_params = {}
         sec_level = max(float(self._get_param(security_params, "security_level", default=1.0)), 1e-6)
-        eta_r = float(self._get_param(security_params, "attack_rate_penalty", default=0.35))
-        eta_e = float(self._get_param(security_params, "attack_energy_penalty", default=0.45))
         rho_sec = float(self._get_param(security_params, "security_risk_weight", default=0.0))
         w_secure_capacity = float(self._get_param(security_params, "secure_capacity_weight", default=0.0))
 
-        n_f = max(float(self._get_param(security_params, "frame_length_bits", default=8192.0)), 1.0)
-        n_i = float(np.clip(self._get_param(security_params, "block_length_bits", default=2048.0), 1.0, n_f))
+        n_f = max(float(self._get_param(security_params, "frame_length_bits", default=64.0)), 1.0)
+        n_i = float(np.clip(self._get_param(security_params, "block_length_bits", default=32.0), 1.0, n_f))
 
+        # T0.9: eavesdropping thụ động — p_att KHÔNG làm giảm rate/tăng năng lượng.
         p_att = self._attack_probability(security_params)
-        r_eff = max(r_up_nom * (1.0 - eta_r * p_att), 1.0)
+        r_eff = max(r_up_nom, 1.0)
         security_strength = float(np.clip(1.0 - p_att, 0.0, 1.0))
+        # [B] Eq(9)
         secure_capacity = float((r_up_nom / (8.0 * n_i)) * np.log2(8.0 * n_i) * security_strength)
 
         # Local-energy term: convex cubic form in alpha_l.
@@ -109,7 +111,7 @@ class CMSOSolver:
         # Security-aware offloading terms (all affine in alpha_n).
         e_enc = (kappa * (f_m ** 2) * alpha_n * s_m * c_en) / sec_level
         t_tx = alpha_n * s_m / r_eff
-        e_tx = p_m * t_tx * (1.0 + eta_e * p_att)
+        e_tx = p_m * t_tx  # T0.9: bỏ hệ số (1 + η_e·p_att)
         e_wait = p_w * alpha_n * s_m * c_m / f_n
         service_cost = g_n * alpha_n * s_m * c_m
         security_risk_cost = rho_sec * p_att * alpha_n

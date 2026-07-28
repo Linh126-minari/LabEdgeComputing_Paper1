@@ -1,13 +1,28 @@
 # configs/security/paillier_params.yaml
+#
+# Hệ bảo mật HAI LỚP (T0.3 Phương án 1 — quyết định 26/07/2026):
+#   Lớp 1 — Mã hóa đồng cấu Paillier [A]: bảo vệ nội dung khỏi MEC server tò mò.
+#   Lớp 2 — Mã khối đối xứng lớp liên kết [B]: bảo vệ khỏi eavesdropper trên kênh.
+# Hai tham số key_length (Paillier) và block_length (block cipher) là HAI khái
+# niệm khác nhau, KHÔNG được trộn (lỗi cũ: N_i = 2048 lấy từ khóa Paillier).
+#
+# Giá trị tham chiếu configs/params_master.yaml.
 
 encryption:
-  enabled: true          # Bật/tắt tính năng bảo mật để so sánh (Hình 6, 7)
-  key_length: 1024       # Kích thước khóa (bits) 
-  security_level: 1.0    # Hệ số mức bảo mật chuẩn hóa [0,1]
-  
-  # Chi phí tính toán ảo (Simulation Mode)
-  # Dùng để tính toán nhanh mà không cần chạy mã hóa thật lúc training
-  overhead_cycles_per_bit: 800 # c_m^en 
-  
-  # Cờ điều khiển chế độ
-  mode: "simulation"     # "simulation" (dùng công thức) hoặc "emulation" (chạy thật)
+  enabled: true
+  security_level: 1.0            # Hệ số mức bảo mật chuẩn hóa [0,1]
+  mode: "simulation"             # "simulation" (công thức) hoặc "emulation" (chạy thật)
+
+  # --- Lớp 1: Mã hóa đồng cấu (Paillier) — theo [A] ---
+  homomorphic:
+    key_length_bits: ${homomorphic_key_length.value}       # source: [A] Section 3.3
+    cycles_per_bit: ${homomorphic_cycles_per_bit.value}    # source: [A] Section 6 (c^en_m)
+
+  # --- Lớp 2: Mã khối đối xứng — theo [B], dùng cho lượng hóa security strength ---
+  block_cipher:
+    frame_length_bits: ${block_cipher_frame_length.value}  # N_f, source: [B] Table I
+    block_length_bits: ${block_cipher_block_length.value}  # N_i, biến quyết định — xem T3.1
+    cycles_per_bit: ${block_cipher_cycles_per_bit.value}   # source: [B] Table I (q^en_i)
+
+  # Tổng chi phí mã hóa hai lớp: 800 + 90 = 890 cycles/bit
+  overhead_cycles_per_bit: ${encryption_total_cycles_per_bit.value}

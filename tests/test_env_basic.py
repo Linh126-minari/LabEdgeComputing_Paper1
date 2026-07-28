@@ -1,6 +1,7 @@
 import numpy as np
 from src.env.entities import User, MECServer, AuxVehicle
 from src.env.channel import ChannelModel
+from src.env.traffic import TaskGenerator
 
 def main():
     # 1. Khởi tạo
@@ -8,11 +9,11 @@ def main():
     aux = AuxVehicle(id=1, position=np.array([50.0, 10.0]), cpu_frequency=0.5e9)
     user = User(id=2, position=np.array([-250.0, 5.0]), cpu_frequency=0.5e9)
     channel = ChannelModel()
-    
 
-    # 2. Sinh Task
-    user.generate_task()
-    print(f"User Task: {user.current_task.size / 8 / 1024:.2f} KB")
+
+    # 2. Sinh Task (T0.4: chỉ TaskGenerator được phép sinh task)
+    user.current_task = TaskGenerator().generate_task()
+    print(f"User Task: {user.current_task.size / 1000:.2f} kbit")
 
     # 3. Kiểm tra vùng phủ sóng
     print(f"Distance to MEC: {mec.get_distance(user):.2f} m")

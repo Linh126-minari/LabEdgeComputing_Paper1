@@ -1,21 +1,28 @@
 # configs/config.yaml
 defaults:
+  - params_master              # SINGLE SOURCE OF TRUTH — load trước mọi thứ (T0.1)
   - env: scenario_default      # Load configs/env/scenario_default.yaml
   - agent: dueling_dqn         # Load configs/agent/dueling_dqn.yaml
   - security: paillier_params  # Load configs/security/paillier_params.yaml
   - _self_
 
 # Cấu hình chung cho toàn hệ thống
+# (Trọng số reward tham chiếu params_master — MỞ RỘNG, sẽ thay bởi T1.2/T1.3)
 general:
   project_name: "CSO-Sim-Framework"
   random_seed: 42              # Để tái lập kết quả (Reproducibility)
   device: "cuda"               # Hoặc "cpu"
   verbose: true                # In log chi tiết
-  weight_delay: 1.0
-  weight_energy: 0.5
-  weight_cost: 0.3
-  weight_security: 0.4
-  weight_penalty: 100.0
+
+  # Điều khiển huấn luyện (khai báo tường minh để override được qua CLI:
+  # `python train.py general.num_episodes=5`). Đây là tham số điều khiển thực
+  # nghiệm, KHÔNG phải tham số vật lý, nên không nằm trong params_master.yaml.
+  num_episodes: 500            # Số episode huấn luyện
+  eval_interval: 10            # Đánh giá sau mỗi N episode
+  log_interval: 5              # In log sau mỗi N episode
+
+  # T1.2 (Phương án 1): reward = −(C_u − ϖ₁·U_u) [cents] — không còn weighted-sum
+  varpi_1: ${varpi_1.value}
 
 # Quản lý đường dẫn (như đã thảo luận trước đó)
 paths:

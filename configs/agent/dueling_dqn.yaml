@@ -1,22 +1,34 @@
 # configs/agent/dueling_dqn.yaml
 
 name: "DuelingDQN"
-algo: "DDRP" # Tên thuật toán trong bài báo
+algo: "DDRP" # Tên thuật toán trong [A]. LƯU Ý (T0.11): [A] chỉ dùng Dueling;
+             # Double DQN là MỞ RỘNG của dự án — DDQN thuần giữ làm baseline (T2.5)
 
 hyperparameters:
-  learning_rate: 0.001   # Alpha 
-  gamma: 0.9             # Discount factor 
+  learning_rate: 0.001   # Alpha
+  gamma: 0.95            # T1.1 bước 6: deadline động tạo coupling thời gian thật
+                         # → horizon dài có nghĩa; sweep {0.9, 0.95, 0.99} và báo cáo
   batch_size: 64
   buffer_size: 100000    # Replay buffer capacity
-  
-  # Epsilon-Greedy Strategy
+
+  # T0.11: warm-up — số sample tối thiểu trước khi train (chuẩn 1000-10000)
+  learning_starts: 2000
+
+  # T0.11: Double DQN + target update
+  use_double_dqn: true       # false = DQN thuần (baseline)
+  use_soft_update: false     # true = soft update τ mỗi step (so sánh qua config)
+  tau: 0.005
+
+  # Epsilon-Greedy Strategy (T0.11: khuyến nghị linear decay theo tổng step)
+  epsilon_schedule: "linear" # "linear" hoặc "exponential"
+  exploration_fraction: 0.3  # ε đạt epsilon_end sau 30% tổng số step
   epsilon_start: 1.0
   epsilon_end: 0.01
-  epsilon_decay: 0.995
-  
+  epsilon_decay: 0.995       # chỉ dùng khi epsilon_schedule="exponential"
+
   # Neural Network Architecture
-  hidden_size: 256       # Số neuron lớp ẩn 
-  target_update_freq: 100 # Cập nhật mạng target sau mỗi 100 steps
+  hidden_size: 256       # Số neuron lớp ẩn
+  target_update_freq: 100 # Cập nhật mạng target sau mỗi 100 steps (hard update)
 
   # Discretization (Rời rạc hóa hành động liên tục beta)
   alpha_levels: 10      # Mức rời rạc cho alpha_l, alpha_j, alpha_n

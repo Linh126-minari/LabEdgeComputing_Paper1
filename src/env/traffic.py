@@ -109,7 +109,17 @@ class TaskGenerator:
             config: TrafficConfig object (uses defaults from paper if None)
         """
         self.config = config or TrafficConfig()
-        
+
+        # T0.4: assertion bắt lỗi đơn vị sớm — task size phải là BITS
+        # ([A] §6: 100-1000 kbit = 102400-1024000 bits)
+        assert 1e4 < self.config.task_size_min < 1e7, (
+            f"task_size_min = {self.config.task_size_min} nằm ngoài dải hợp lý "
+            f"(1e4, 1e7) bits — nghi ngờ sai đơn vị (KB thay vì bits?)"
+        )
+        assert self.config.task_size_max >= self.config.task_size_min, (
+            "task_size_max phải >= task_size_min"
+        )
+
         # Statistics tracking
         self.total_tasks_generated = 0
         self.task_sizes_generated: List[float] = []
