@@ -816,7 +816,7 @@ Tệ hơn: với tham số Table I của [B] (`ρ=1e-4`, `N_l=8`, `v_max=24`, `L
 
 ---
 
-## PHASE 2 — BASELINE & EVALUATION
+## PHASE 2 — BASELINE & EVALUATION [ĐÃ HOÀN THÀNH — Xem BAO_CAO_PHASE2.md]
 
 > **Không có baseline thì không có evaluation.** `.tex` liệt kê 9 baseline nhưng repo hiện không có code cho bất kỳ cái nào. Đây là công việc ưu tiên P0 về mức độ, chỉ xếp sau Phase 0/1 về thứ tự vì baseline phải chạy trên formulation đã chốt.
 

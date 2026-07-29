@@ -13,7 +13,7 @@ import torch.optim as optim
 from typing import Tuple, List
 from collections import deque
 
-from src.agents.networks import DuelingNetwork
+from src.agents.networks import DuelingNetwork, StandardDQNNetwork
 from src.agents.memory import ReplayBuffer
 from src.utils.logger import Logger
 
@@ -39,6 +39,7 @@ class DRLAgent:
                  batch_size: int = 64,
                  target_update_freq: int = 100,
                  learning_starts: int = 2000,
+                 use_dueling: bool = True,
                  use_double_dqn: bool = True,
                  use_soft_update: bool = False,
                  tau: float = 0.005,
@@ -62,16 +63,14 @@ class DRLAgent:
             batch_size: Batch size for training
             target_update_freq: Frequency to update target network (hard update)
             learning_starts: Số sample tối thiểu trong buffer trước khi train
-                (T0.11: warm-up; 64 là quá ngắn, chuẩn 1000-10000)
-            use_double_dqn: Dùng Double DQN target (T0.11) — MỞ RỘNG so với [A]
+            use_dueling: Dùng Dueling Network architecture (T2.5)
+            use_double_dqn: Dùng Double DQN target (T0.11)
             use_soft_update: Soft update target (τ mỗi step) thay hard copy
             tau: Hệ số soft update
-            epsilon_schedule: "linear" (khuyến nghị T0.11: decay theo tổng số
-                step với exploration_fraction) hoặc "exponential" (mỗi episode)
+            epsilon_schedule: "linear" hoặc "exponential"
             exploration_fraction: Tỉ lệ số step huấn luyện dành cho decay ε
             total_training_steps: Tổng số step dự kiến (cho linear decay)
-            base_dt: Bước thời gian cơ sở của env (T1.4 — semi-MDP: discount
-                γ_eff = γ^(elapsed_time/base_dt))
+            base_dt: Bước thời gian cơ sở của env
             device: Device to use (cpu/cuda)
         """
         self.state_dim = state_dim
@@ -86,6 +85,7 @@ class DRLAgent:
         self.batch_size = batch_size
         self.target_update_freq = target_update_freq
         self.learning_starts = max(int(learning_starts), batch_size)
+        self.use_dueling = use_dueling
         self.use_double_dqn = use_double_dqn
         self.use_soft_update = use_soft_update
         self.tau = tau
@@ -101,11 +101,9 @@ class DRLAgent:
         self.logger = Logger("DRLAgent")
         
         # ==================== Networks ====================
-        # Main Q-network (policy network)
-        self.q_network = DuelingNetwork(state_dim, self.total_actions).to(self.device)
-        
-        # Target Q-network (for stability)
-        self.target_network = DuelingNetwork(state_dim, self.total_actions).to(self.device)
+        net_cls = DuelingNetwork if use_dueling else StandardDQNNetwork
+        self.q_network = net_cls(state_dim, self.total_actions).to(self.device)
+        self.target_network = net_cls(state_dim, self.total_actions).to(self.device)
         self.target_network.load_state_dict(self.q_network.state_dict())
         self.target_network.eval()  # No gradient for target network
         
