@@ -77,8 +77,9 @@ class CMSOPolicy(BasePolicy):
         # Solve 1D convex problem over alpha_l in [alpha_min, alpha_max]
         optimal_alpha = self._solve_convex(env, user, aux, task, tx_rate, alpha_min, alpha_max)
 
-        # Map continuous optimal_alpha in [0, 1] to discrete level 0..9
-        alpha_level = int(np.clip(round(optimal_alpha * 9.0), 0, 9))
+        # Map continuous optimal_alpha in [0, 1] to discrete level based on alpha_levels
+        alpha_levels = getattr(env.config, "alpha_levels", 10)
+        alpha_level = int(np.clip(round(optimal_alpha * (alpha_levels - 1)), 0, alpha_levels - 1))
 
         return np.array([alpha_level, 1, self.resource_level], dtype=np.int64)
 

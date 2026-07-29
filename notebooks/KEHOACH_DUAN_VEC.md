@@ -1049,7 +1049,7 @@ Không cần trùng số tuyệt đối (mô hình đã khác), nhưng **xu hư�
 
 ---
 
-## PHASE 3 — ĐÓNG GÓP MỚI
+## PHASE 3 — ĐÓNG GÓP MỚI [ĐÃ HOÀN THÀNH — Xem BAO_CAO_PHASE3.md]
 
 > Đây là phần tạo ra giá trị công bố. Ba task T3.1, T3.2, T3.4 rẻ và sạch; T3.3 đắt nhưng là chỗ hai bài **thực sự** gặp nhau.
 

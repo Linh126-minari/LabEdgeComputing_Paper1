@@ -34,7 +34,7 @@ def test_alpha_constraints_on_random_actions(env):
     rng = np.random.default_rng(0)
     for _ in range(1000):
         action = np.array([rng.integers(0, 10), rng.integers(0, 2), rng.integers(0, 10)])
-        alpha_l, alpha_j, alpha_n, _ = env._decode_action_to_alphas(action)
+        alpha_l, alpha_j, alpha_n, _, _ = env._decode_action_to_alphas(action)
         assert abs(alpha_l + alpha_j + alpha_n - 1.0) < 1e-9
         assert alpha_j * alpha_n == pytest.approx(0.0)
         assert 0.0 <= alpha_l <= 1.0

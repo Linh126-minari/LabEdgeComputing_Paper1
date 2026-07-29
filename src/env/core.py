@@ -126,6 +126,12 @@ class EnvironmentConfig:
     encryption_overhead_cycles_per_bit: float = 890.0  # 800 [A] + 90 [B]
     security_level: float = 1.0
 
+    # Attacker model & Crypto Scheme (Phase 3 - T3.2, T3.4)
+    attacker_model: str = "expected"   # "expected" [B] vs "realized" (T3.2)
+    crypto_scheme: str = "paillier"   # "paillier", "aes", or "none" (T3.4)
+    ciphertext_expansion: float = 2.0  # 2.0x for Paillier (mod h -> mod h^2), 1.0x for AES (T3.4)
+    use_4d_action: bool = True         # MultiDiscrete[10, 2, 10, 4] with N_i (T3.1)
+
     # Attacker model — Ref: [B] Table I, Eq(5)-(9)
     attacker_density: float = 1e-4  # ρ (vehicles/vehicle) [B] Table I (T0.2)
     frame_length_bits: float = 64.0  # N_f [B] Table I (T0.3)
@@ -498,7 +504,7 @@ class VehicularEdgeEnvironment(gym.Env):
                 (dùng cho discount γ^(Δt/dt)); không có transition rỗng nào
                 được trả về (T1.4 DoD).
         """
-        alpha_l, alpha_j, alpha_n, resource_level = self._decode_action_to_alphas(action)
+        alpha_l, alpha_j, alpha_n, resource_level, block_length_bits = self._decode_action_to_alphas(action)
         user = self.users[0]
 
         # Bất biến semi-MDP: state đưa cho agent LUÔN chứa task ở đầu hàng đợi
@@ -512,7 +518,7 @@ class VehicularEdgeEnvironment(gym.Env):
         tau_eff, link_limited = self.effective_deadline(user, task)
 
         metrics = self._execute_task(
-            user, task, alpha_l, alpha_j, alpha_n, resource_level, tau_eff)
+            user, task, alpha_l, alpha_j, alpha_n, resource_level, tau_eff, block_length_bits)
 
         # ==================== Reward (T1.2 — Phương án 1) ====================
         reward, reward_components = self._compute_reward(metrics)
@@ -571,29 +577,35 @@ class VehicularEdgeEnvironment(gym.Env):
 
     # ==================== Action decode ====================
 
-    def _decode_action_to_alphas(self, action: np.ndarray) -> Tuple[float, float, float, int]:
+    def _decode_action_to_alphas(self, action: np.ndarray) -> Tuple[float, float, float, int, float]:
         """
-        [alpha_l_level, target, resource_level] → (α_l, α_j, α_n, level).
+        [alpha_l_level, target, resource_level, (optional) n_i_index] → (α_l, α_j, α_n, level, N_i).
         Ràng buộc [A] 23b-23d: α_l + α_j + α_n = 1, α_j·α_n = 0.
         """
         alpha_levels = max(int(self.config.alpha_levels), 1)
         action_arr = np.asarray(action, dtype=np.int64).flatten()
         if action_arr.size < 3:
-            raise ValueError(f"Expected action with 3 dimensions, got {action_arr.size}: {action}")
+            raise ValueError(f"Expected action with at least 3 dimensions, got {action_arr.size}: {action}")
 
         alpha_l_level = int(np.clip(action_arr[0], 0, alpha_levels - 1))
         target_selection = int(np.clip(action_arr[1], 0, 1))
         resource_level = int(np.clip(action_arr[2], 0, int(self.config.action_levels) - 1))
+
+        block_length_bits = self.config.encryption_block_length_bits
+        if action_arr.size >= 4:
+            n_i_options = (8.0, 16.0, 32.0, 64.0)
+            n_i_idx = int(np.clip(action_arr[3], 0, len(n_i_options) - 1))
+            block_length_bits = n_i_options[n_i_idx]
 
         scale = float(max(alpha_levels - 1, 1))
         alpha_l = float(alpha_l_level / scale)
         alpha_remote = max(0.0, 1.0 - alpha_l)
 
         if alpha_remote <= 1e-12:
-            return 1.0, 0.0, 0.0, resource_level
+            return 1.0, 0.0, 0.0, resource_level, block_length_bits
         if target_selection == 0:
-            return alpha_l, alpha_remote, 0.0, resource_level
-        return alpha_l, 0.0, alpha_remote, resource_level
+            return alpha_l, alpha_remote, 0.0, resource_level, block_length_bits
+        return alpha_l, 0.0, alpha_remote, resource_level, block_length_bits
 
     # ==================== T1.5 — Thực thi task (chung mọi user) ====================
 
@@ -605,7 +617,8 @@ class VehicularEdgeEnvironment(gym.Env):
                     max_delay=task.max_delay)
 
     def _execute_task(self, user: User, task: Task, alpha_l: float, alpha_j: float,
-                      alpha_n: float, resource_level: int, tau_eff: float) -> Dict[str, Any]:
+                      alpha_n: float, resource_level: int, tau_eff: float,
+                      block_length_bits: Optional[float] = None) -> Dict[str, Any]:
         """
         Thực thi một task cho user bất kỳ (T1.5: tách khỏi users[0]).
 
@@ -621,8 +634,8 @@ class VehicularEdgeEnvironment(gym.Env):
         offload_size = task.size * (alpha_j + alpha_n)
         t_enc, E_enc = 0.0, 0.0
         if cfg.encryption_enabled and offload_size > 0:
-            t_enc = self._estimate_encryption_overhead(offload_size)
-            E_enc = self.security_overhead_model.encryption_energy(offload_size, kappa=cfg.kappa)
+            t_enc = self._estimate_encryption_overhead(offload_size, block_length_bits=block_length_bits)
+            E_enc = self.security_overhead_model.encryption_energy(offload_size, kappa=cfg.kappa, block_length_bits=block_length_bits)
 
         energy_user = 0.0        # J — năng lượng của xe user
         energy_remote = 0.0      # J — năng lượng tính toán của AV ([A] Eq(22), λ^n)
@@ -655,7 +668,7 @@ class VehicularEdgeEnvironment(gym.Env):
                     self.mec_bw_available[0], resource_level))
 
                 mec_delay, mec_risk, tx_time, mec_cap = self._compute_mec_delay(
-                    user, mec, mec_task, cpu_freq, bw)
+                    user, mec, mec_task, cpu_freq, bw, block_length_bits=block_length_bits)
                 energy_user += self._compute_offloading_energy(user, mec_task, tx_time)
                 cost_service += self._compute_mec_cost(mec, mec_task, resource_level, tau_eff)
 
@@ -694,7 +707,7 @@ class VehicularEdgeEnvironment(gym.Env):
                     self.aux_bw_available[aux_idx], resource_level))
 
                 aux_delay, aux_risk, tx_time, aux_cap = self._compute_v2v_delay(
-                    user, aux, aux_task, cpu_freq, bw)
+                    user, aux, aux_task, cpu_freq, bw, block_length_bits=block_length_bits)
                 energy_user += self._compute_offloading_energy(user, aux_task, tx_time)
                 cost_service += self._compute_aux_cost(aux, aux_task, resource_level, tau_eff)
                 # [A] Eq(22): năng lượng tính toán của AV quy tiền qua λ^n (T1.2)
@@ -880,62 +893,96 @@ class VehicularEdgeEnvironment(gym.Env):
         return (task.cycles_per_bit * task.size) / user.cpu_frequency
 
     def _compute_mec_delay(self, user: User, mec: MECServer, task: Task,
-                           cpu_freq: float, bandwidth: float) -> Tuple[float, float, float, float]:
+                           cpu_freq: float, bandwidth: float,
+                           block_length_bits: Optional[float] = None) -> Tuple[float, float, float, float]:
         """
         t_mec = t_upload + t_compute. Ref: [A] Eq(10), Eq(12).
         T0.9: p_att KHÔNG làm giảm rate (eavesdropping thụ động theo [B]).
         Bỏ qua downlink theo [A] §3.4 / [B] §II-B.
+        T3.4: ciphertext_expansion và decryption_overhead_cycles.
         """
         dist = user.get_distance(mec)
         uplink_rate = self.channel_model.get_uplink_rate_mec(dist, user.tx_power)
         attack_prob, secure_capacity = self._compute_security_metrics(
-            d_sender_range=self.config.security_range_v2i, link_rate_bps=uplink_rate)
-        upload_time = task.size / max(uplink_rate, 1.0)
-        computation_time = (task.cycles_per_bit * task.size) / cpu_freq
+            d_sender_range=self.config.security_range_v2i, link_rate_bps=uplink_rate,
+            block_length_bits=block_length_bits, user=user)
+
+        expansion = getattr(self.config, "ciphertext_expansion", 1.0)
+        if getattr(self.config, "crypto_scheme", "paillier") == "none":
+            expansion = 1.0
+
+        tx_size = task.size * expansion
+        upload_time = tx_size / max(uplink_rate, 1.0)
+
+        # Decryption overhead (AES has decryption on receiver, Paillier doesn't)
+        dec_cycles = 0.0
+        if getattr(self.config, "crypto_scheme", "paillier") == "aes":
+            dec_cycles = 90.0 * task.size
+
+        computation_time = (task.cycles_per_bit * task.size + dec_cycles) / cpu_freq
         return upload_time + computation_time, attack_prob, upload_time, secure_capacity
 
     def _compute_v2v_delay(self, user: User, aux: AuxVehicle, task: Task,
-                           cpu_freq: float, bandwidth: float) -> Tuple[float, float, float, float]:
+                           cpu_freq: float, bandwidth: float,
+                           block_length_bits: Optional[float] = None) -> Tuple[float, float, float, float]:
         """t_aux = t_v2v + t_compute. Ref: [A] Eq(17), Eq(18)."""
         dist = user.get_distance(aux)
         v2v_rate = self.channel_model.get_uplink_rate_v2v(dist, user.tx_power)
         attack_prob, secure_capacity = self._compute_security_metrics(
-            d_sender_range=self.config.security_range_v2v, link_rate_bps=v2v_rate)
-        transmission_time = task.size / max(v2v_rate, 1.0)
-        computation_time = (task.cycles_per_bit * task.size) / cpu_freq
+            d_sender_range=self.config.security_range_v2v, link_rate_bps=v2v_rate,
+            block_length_bits=block_length_bits, user=user)
+
+        expansion = getattr(self.config, "ciphertext_expansion", 1.0)
+        if getattr(self.config, "crypto_scheme", "paillier") == "none":
+            expansion = 1.0
+
+        tx_size = task.size * expansion
+        transmission_time = tx_size / max(v2v_rate, 1.0)
+
+        dec_cycles = 0.0
+        if getattr(self.config, "crypto_scheme", "paillier") == "aes":
+            dec_cycles = 90.0 * task.size
+
+        computation_time = (task.cycles_per_bit * task.size + dec_cycles) / cpu_freq
         return transmission_time + computation_time, attack_prob, transmission_time, secure_capacity
 
-    # ==================== Security ([B] Eq(5)-(9)) ====================
-
     def _compute_security_metrics(self, d_sender_range: float,
-                                  link_rate_bps: float) -> Tuple[float, float]:
+                                  link_rate_bps: float,
+                                  block_length_bits: Optional[float] = None,
+                                  user: Optional[User] = None) -> Tuple[float, float]:
         """
-        [B] Eq(6)-(9). Ghi chú ngữ nghĩa (T0.2/T1.7):
-        - d_i là BÁN KÍNH VÙNG PHÁT của người gửi (không phải khoảng cách tới đích);
-          hiệu chỉnh riêng V2I/V2V (T1.7) để n^e nằm trong vùng không suy biến.
-        - n^e là KỲ VỌNG từ mật độ ρ (không chặn bằng số attacker mô phỏng).
-        - N_i không bị chặn bởi task size (T0.3).
+        [B] Eq(6)-(9). Ghi chú ngữ nghĩa (T0.2/T1.7/T3.1/T3.2):
+        - d_i là BÁN KÍNH VÙNG PHÁT của người gửi;
+        - attacker_model == "realized": đếm số attacker vật lý trong tầm phủ (T3.2);
+        - block_length_bits: độ dài khối N_i từ action (T3.1).
         """
         n_f = max(self.config.frame_length_bits, 1.0)
-        n_i = min(max(self.config.encryption_block_length_bits, 1.0), n_f)
+        n_i_val = block_length_bits if block_length_bits is not None else self.config.encryption_block_length_bits
+        n_i = min(max(float(n_i_val), 1.0), n_f)
 
-        n_e = self.security_overhead_model.expected_attackers(
-            coverage_radius_m=d_sender_range,
-            attacker_density=self.config.attacker_density,
-            lane_count=self.config.lane_count,
-            max_speed_mps=self.config.road_max_speed_mps,
-        )
+        if getattr(self.config, "attacker_model", "expected") == "realized" and user is not None:
+            n_e = float(sum(1 for att in self.attack_vehicles if user.get_distance(att) <= d_sender_range))
+        else:
+            n_e = self.security_overhead_model.expected_attackers(
+                coverage_radius_m=d_sender_range,
+                attacker_density=self.config.attacker_density,
+                lane_count=self.config.lane_count,
+                max_speed_mps=self.config.road_max_speed_mps,
+            )
+
         s = self.security_overhead_model.security_strength(n_i, n_f, n_e)
         p_att = self.security_overhead_model.attack_success_probability(n_i, n_f, n_e)
         u = self.security_overhead_model.secure_information_capacity(link_rate_bps, n_i, s)
         return p_att, u
 
-    def _estimate_encryption_overhead(self, data_size_bits: float) -> float:
-        """t_enc = c_en·s/f. Ref: [A] Eq(4); c_en = 890 (hai lớp, T0.3)."""
-        if not self.config.encryption_enabled or self.security_module is None:
+    def _estimate_encryption_overhead(self, data_size_bits: float, block_length_bits: Optional[float] = None) -> float:
+        """t_enc = c_en(N_i)·s/f. Ref: [A] Eq(4)."""
+        if not self.config.encryption_enabled:
             return 0.0
         if self.config.encryption_mode == "simulation":
-            return self.security_overhead_model.encryption_time(data_size_bits)
+            return self.security_overhead_model.encryption_time(data_size_bits, block_length_bits=block_length_bits)
+        if self.security_module is None:
+            return 0.0
         duration, _ = self.security_module.perform_real_encryption_benchmark(1.0)
         return duration * (data_size_bits / 1024.0)
 

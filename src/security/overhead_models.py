@@ -51,17 +51,31 @@ class SecurityOverheadModel:
 	def __init__(self, config: SecurityOverheadConfig):
 		self.config = config
 
-	def encryption_time(self, data_size_bits: float) -> float:
-		"""t_enc = c_en * s / (f_u * sec_level). Ref: [A] Eq(4); c_en = 890 (hai lớp, T0.3)."""
-		sec = max(self.config.security_level, 1e-6)
-		f_u = max(self.config.user_cpu_frequency, 1.0)
-		return (self.config.overhead_cycles_per_bit * data_size_bits) / (f_u * sec)
+	def compute_cycles_per_bit(self, block_length_bits: float | None = None, kappa_N: float = 0.1) -> float:
+		"""
+		Tính c_en(N_i) = c_en_base * (1 + kappa_N * log2(N_i / N_min)) (Task T3.1).
+		Khép kín vòng trade-off security ↔ economic cost.
+		"""
+		base_c_en = self.config.overhead_cycles_per_bit
+		if block_length_bits is None:
+			return base_c_en
+		n_i = max(float(block_length_bits), 8.0)
+		n_min = 8.0
+		return base_c_en * (1.0 + kappa_N * np.log2(n_i / n_min))
 
-	def encryption_energy(self, data_size_bits: float, kappa: float = 1e-27) -> float:
-		"""E_enc = kappa * c_en * s * f_u^2 / sec_level. Ref: [A] Eq(5)."""
+	def encryption_time(self, data_size_bits: float, block_length_bits: float | None = None) -> float:
+		"""t_enc = c_en(N_i) * s / (f_u * sec_level). Ref: [A] Eq(4)."""
 		sec = max(self.config.security_level, 1e-6)
 		f_u = max(self.config.user_cpu_frequency, 1.0)
-		return kappa * self.config.overhead_cycles_per_bit * data_size_bits * (f_u ** 2) / sec
+		c_en = self.compute_cycles_per_bit(block_length_bits)
+		return (c_en * data_size_bits) / (f_u * sec)
+
+	def encryption_energy(self, data_size_bits: float, kappa: float = 1e-27, block_length_bits: float | None = None) -> float:
+		"""E_enc = kappa * c_en(N_i) * s * f_u^2 / sec_level. Ref: [A] Eq(5)."""
+		sec = max(self.config.security_level, 1e-6)
+		f_u = max(self.config.user_cpu_frequency, 1.0)
+		c_en = self.compute_cycles_per_bit(block_length_bits)
+		return kappa * c_en * data_size_bits * (f_u ** 2) / sec
 
 	def frame_vulnerability(self, block_length_bits: float, frame_length_bits: float | None = None) -> float:
 		"""
