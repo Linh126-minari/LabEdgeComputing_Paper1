@@ -1,0 +1,92 @@
+# configs/env/scenario_riobus.yaml
+# Scenario using empirical Rio bus GPS trajectories (Phase 4 - Task T4.2)
+
+name: "RioBus_Empirical_Trajectory"
+description: "Scenario 10 users, 1 MEC, 3 AVs backed by real Rio bus GPS trajectories"
+
+# Flattened keys used directly by create_env_config
+num_users: ${num_users.value}
+num_mec_servers: ${num_mec_servers.value}
+num_auxiliary_vehicles: ${num_auxiliary_vehicles.value}
+num_attack_vehicles: ${num_attack_vehicles.value}
+sim_area_x: ${sim_area_x.value}
+sim_area_y: ${sim_area_y.value}
+task_arrival_rate: ${task_arrival_rate.value}
+task_size_min: ${task_size_min.value}
+task_size_max: ${task_size_max.value}
+task_cycles_per_bit: ${task_cycles_per_bit.value}
+task_deadline: ${task_deadline_app.value}
+dt: ${dt.value}
+episode_length: ${episode_length.value}
+v2v_range: ${v2v_range.value}
+
+mec_cpu_frequency: ${mec_cpu_frequency.value}
+aux_cpu_frequency: ${aux_cpu_frequency.value}
+user_cpu_frequency: ${user_cpu_frequency.value}
+
+channel:
+  bandwidth_mec: ${bandwidth_mec.value}
+  bandwidth_v2v: ${bandwidth_v2v.value}
+  noise_power: ${noise_power.value}
+  channel_gain: ${channel_ref_gain.value}
+  ref_distance: ${channel_ref_distance.value}
+  path_loss_exp: ${path_loss_exponent.value}
+
+mec_server:
+  count: ${num_mec_servers.value}
+  coverage_radius: ${mec_coverage_radius.value}
+  curb_distance: ${curb_distance.value}
+  cpu_frequency: ${mec_cpu_frequency.value}
+  base_price: ${mec_base_price.value}
+  credibility: ${mec_credibility.value}
+  bandwidth_pool: ${mec_bandwidth_pool.value}
+
+users:
+  count: ${num_users.value}
+  velocity_min: ${velocity_min.value}
+  velocity_max: ${velocity_max.value}
+  tx_power: ${tx_power.value}
+  idle_power: ${idle_power.value}
+  task_size_min: ${task_size_min.value}
+  task_size_max: ${task_size_max.value}
+  cycles_per_bit: ${task_cycles_per_bit.value}
+  max_delay: ${task_deadline_app.value}
+  price_energy_local: ${price_energy_local.value}
+
+aux_vehicles:
+  count: ${num_auxiliary_vehicles.value}
+  cpu_frequency: ${aux_cpu_frequency.value}
+  base_price: ${aux_base_price.value}
+  credibility: ${aux_credibility.value}
+  price_energy_av: ${price_energy_av.value}
+  bandwidth_pool: ${aux_bandwidth_pool.value}
+
+mobility:
+  type: "trace"                  # Real GPS trace-backed mobility
+  trace_file: "data/processed/riobus_corridor.csv"
+
+attack:
+  count: ${num_attack_vehicles.value}
+  density: ${attacker_density.value}
+  lane_count: ${lane_count.value}
+  road_max_speed_mps: ${road_max_speed.value}
+  frame_length_bits: ${block_cipher_frame_length.value}
+  encryption_block_length_bits: ${block_cipher_block_length.value}
+  security_range_v2i: ${security_range_v2i.value}
+  security_range_v2v: ${security_range_v2v.value}
+
+deadline:
+  floor: ${deadline_floor.value}
+  urgency_cap: ${urgency_cap.value}
+
+constraints:
+  energy_budget_max: ${energy_budget_max.value}
+  penalty_mode: "fixed"
+  deadline_penalty: ${deadline_penalty.value}
+  energy_violation_penalty: ${energy_violation_penalty.value}
+
+background:
+  users_enabled: true
+  alpha_l: 0.5
+  resource_level: 4
+  load_enabled: false

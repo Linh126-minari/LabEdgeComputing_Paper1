@@ -1210,7 +1210,7 @@ Hiện `α_l ∈ {0, 1/9, ..., 1}` (10 mức). Cả [A] (`α ∈ (0,1)` liên t�
 
 ---
 
-## PHASE 4 — DATASET & SIM-TO-REAL
+## PHASE 4 — DATASET & SIM-TO-REAL [ĐÃ HOÀN THÀNH — Xem BAO_CAO_PHASE4.md]
 
 ---
 

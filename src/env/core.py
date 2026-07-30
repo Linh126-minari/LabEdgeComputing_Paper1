@@ -28,7 +28,7 @@ from gymnasium import spaces
 
 from src.env.entities import User, MECServer, AuxVehicle, AttackVehicle, Task, ComputingNode
 from src.env.channel import ChannelModel
-from src.env.mobility import LinearMobility
+from src.env.mobility import LinearMobility, TraceMobility
 from src.security.crypto_engine import SecurityModule
 from src.security.overhead_models import SecurityOverheadConfig, SecurityOverheadModel
 from src.utils.logger import Logger
@@ -131,6 +131,10 @@ class EnvironmentConfig:
     crypto_scheme: str = "paillier"   # "paillier", "aes", or "none" (T3.4)
     ciphertext_expansion: float = 2.0  # 2.0x for Paillier (mod h -> mod h^2), 1.0x for AES (T3.4)
     use_4d_action: bool = True         # MultiDiscrete[10, 2, 10, 4] with N_i (T3.1)
+
+    # Mobility (Phase 4 - T4.2)
+    mobility_type: str = "linear"  # "linear", "random_waypoint", or "trace"
+    trace_file: str = "data/processed/riobus_corridor.csv"
 
     # Attacker model — Ref: [B] Table I, Eq(5)-(9)
     attacker_density: float = 1e-4  # ρ (vehicles/vehicle) [B] Table I (T0.2)
@@ -250,20 +254,50 @@ class VehicularEdgeEnvironment(gym.Env):
 
     # ==================== Initialization Methods ====================
 
+    def _get_trace_df(self):
+        """Helper to load trace dataset for TraceMobility."""
+        if hasattr(self, "_cached_trace_df"):
+            return self._cached_trace_df
+        from pathlib import Path
+        import pandas as pd
+        t_path = Path(self.config.trace_file)
+        if t_path.exists():
+            try:
+                if t_path.suffix == ".parquet":
+                    df = pd.read_parquet(t_path)
+                else:
+                    df = pd.read_csv(t_path)
+                self._cached_trace_df = df
+                return df
+            except Exception:
+                pass
+        self._cached_trace_df = None
+        return None
+
     def _init_users(self):
+        trace_df = self._get_trace_df() if self.config.mobility_type == "trace" else None
+        v_ids = trace_df["vehicle_id"].unique().tolist() if trace_df is not None and not trace_df.empty else []
+
         for i in range(self.config.num_users):
-            pos = np.array([
-                np.random.uniform(0, self.config.sim_area_x),
-                np.random.uniform(0, self.config.sim_area_y)
-            ])
-            velocity = np.random.uniform(15, 25)  # m/s, Ref: [A] §6
+            if trace_df is not None and v_ids:
+                veh_id = str(v_ids[i % len(v_ids)])
+                mob = TraceMobility(trace_df, vehicle_id=veh_id)
+                pos, velocity = mob.generate_initial_state()
+            else:
+                pos = np.array([
+                    np.random.uniform(0, self.config.sim_area_x),
+                    np.random.uniform(0, self.config.sim_area_y)
+                ])
+                velocity = np.random.uniform(15, 25)  # m/s, Ref: [A] §6
+                mob = LinearMobility()
+
             user = User(
                 id=i,
                 position=pos,
                 cpu_frequency=self.config.user_cpu_frequency,
                 velocity=velocity,
                 tx_power=self.config.user_tx_power,
-                mobility_model=LinearMobility()
+                mobility_model=mob
             )
             self.users.append(user)
 
@@ -285,11 +319,22 @@ class VehicularEdgeEnvironment(gym.Env):
             self.mec_servers.append(mec)
 
     def _init_auxiliary_vehicles(self):
+        trace_df = self._get_trace_df() if self.config.mobility_type == "trace" else None
+        v_ids = trace_df["vehicle_id"].unique().tolist() if trace_df is not None and not trace_df.empty else []
+
         for i in range(self.config.num_auxiliary_vehicles):
-            pos = np.array([
-                np.random.uniform(0, self.config.sim_area_x),
-                np.random.uniform(0, self.config.sim_area_y)
-            ])
+            if trace_df is not None and v_ids:
+                veh_id = str(v_ids[(i + self.config.num_users) % len(v_ids)])
+                mob = TraceMobility(trace_df, vehicle_id=veh_id)
+                pos, velocity = mob.generate_initial_state()
+            else:
+                pos = np.array([
+                    np.random.uniform(0, self.config.sim_area_x),
+                    np.random.uniform(0, self.config.sim_area_y)
+                ])
+                velocity = np.random.uniform(15, 25)
+                mob = LinearMobility()
+
             aux = AuxVehicle(
                 id=i,
                 position=pos,
@@ -297,21 +342,31 @@ class VehicularEdgeEnvironment(gym.Env):
                 base_price=self.config.aux_base_price,
                 credibility=self.config.aux_credibility,
                 current_load=0,
-                velocity=np.random.uniform(15, 25),
-                mobility_model=LinearMobility()
+                velocity=velocity,
+                mobility_model=mob
             )
             self.auxiliary_vehicles.append(aux)
 
     def _init_attack_vehicles(self):
         """T0.9: chỉ minh họa — mô hình bảo mật dùng kỳ vọng mật độ [B] Eq(8)."""
+        trace_df = self._get_trace_df() if self.config.mobility_type == "trace" else None
+        v_ids = trace_df["vehicle_id"].unique().tolist() if trace_df is not None and not trace_df.empty else []
+
         for i in range(self.config.num_attack_vehicles):
-            pos = np.array([
-                np.random.uniform(0, self.config.sim_area_x),
-                np.random.uniform(0, self.config.sim_area_y)
-            ])
+            if trace_df is not None and v_ids:
+                veh_id = str(v_ids[(i + self.config.num_users + self.config.num_auxiliary_vehicles) % len(v_ids)])
+                mob = TraceMobility(trace_df, vehicle_id=veh_id)
+                pos, _ = mob.generate_initial_state()
+            else:
+                pos = np.array([
+                    np.random.uniform(0, self.config.sim_area_x),
+                    np.random.uniform(0, self.config.sim_area_y)
+                ])
+                mob = LinearMobility()
+
             self.attack_vehicles.append(AttackVehicle(
                 id=i, position=pos, cpu_frequency=1e8,
-                mobility_model=LinearMobility()
+                mobility_model=mob
             ))
 
     def _get_state_dim(self) -> int:

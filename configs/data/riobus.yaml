@@ -1,0 +1,20 @@
+# configs/data/riobus.yaml
+data_dir: "data/processed/data_train"
+output_parquet: "data/processed/riobus_corridor.parquet"
+output_csv: "data/processed/riobus_corridor.csv"
+
+# Preprocessing & Resampling parameters
+dt: 0.1                    # Time step in seconds (matches simulator)
+max_duration_seconds: 1000.0 # Maximum trajectory duration per vehicle (s)
+max_velocity_mps: 35.0     # Upper bound for valid bus speed (m/s, ~126 km/h)
+min_velocity_mps: 0.0      # Lower bound for valid bus speed (m/s)
+sim_area_x: 1000.0         # Simulator area bounds x (meters)
+sim_area_y: 1000.0         # Simulator area bounds y (meters)
+
+# Selection filters
+max_vehicles: 10           # Number of vehicles to preprocess and include in corridor
+selected_lines:            # Target bus lines to filter
+  - "298"
+  - "315"
+  - "415"
+  - "550"

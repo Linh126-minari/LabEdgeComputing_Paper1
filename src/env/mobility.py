@@ -7,7 +7,7 @@ Ref: Paper section on vehicular dynamics and trajectory generation.
 
 import numpy as np
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Tuple, Any, Optional
 
 
 class LinearMobility:
@@ -230,3 +230,66 @@ class SumoMobility:
         """
         # TODO: Implement SUMO integration
         return position
+
+
+class TraceMobility:
+    """
+    Real GPS Trace-backed Mobility Model (Phase 4 - Task T4.2).
+    
+    Reads empirical position (x, y) and velocity (v) trajectories from
+    preprocessed Rio bus dataset and updates entity state at each step.
+    """
+    
+    def __init__(self, trace_df: Any, vehicle_id: str, loop: bool = True):
+        import pandas as pd
+        self.vehicle_id = vehicle_id
+        self.loop = loop
+        
+        if trace_df is not None and not trace_df.empty:
+            v_df = trace_df[trace_df["vehicle_id"] == vehicle_id].sort_values("t_rel").reset_index(drop=True)
+            if v_df.empty:
+                v_df = trace_df.sort_values("t_rel").reset_index(drop=True)
+            self.positions = v_df[["x_m", "y_m"]].values.astype(float)
+            self.velocities = v_df["v_mps"].values.astype(float)
+        else:
+            self.positions = np.array([[0.0, 0.0]], dtype=float)
+            self.velocities = np.array([15.0], dtype=float)
+            
+        self.num_points = len(self.positions)
+        self.current_idx = 0
+    
+    def step(self, position: np.ndarray, velocity: float, dt: float = 0.1) -> np.ndarray:
+        if self.num_points == 0:
+            return position
+        self.current_idx += 1
+        if self.current_idx >= self.num_points:
+            if self.loop:
+                self.current_idx = 0
+            else:
+                self.current_idx = self.num_points - 1
+        return self.positions[self.current_idx].copy()
+    
+    def current_velocity(self) -> float:
+        if self.num_points == 0:
+            return 15.0
+        return float(self.velocities[self.current_idx])
+
+    @property
+    def current_direction(self) -> float:
+        if self.num_points < 2:
+            return 0.0
+        prev_idx = max(0, self.current_idx - 1)
+        next_idx = min(self.num_points - 1, self.current_idx)
+        if prev_idx == next_idx:
+            return 0.0
+        dx = self.positions[next_idx][0] - self.positions[prev_idx][0]
+        dy = self.positions[next_idx][1] - self.positions[prev_idx][1]
+        if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+            return 0.0
+        return float(np.arctan2(dy, dx))
+    
+    def generate_initial_state(self) -> Tuple[np.ndarray, float]:
+        self.current_idx = 0
+        if self.num_points == 0:
+            return np.array([0.0, 0.0]), 15.0
+        return self.positions[0].copy(), float(self.velocities[0])
