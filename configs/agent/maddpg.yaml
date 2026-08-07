@@ -1,10 +1,30 @@
 # configs/agent/maddpg.yaml
 
 name: "MADDPG"
+algo: "MADDPG"
 description: "Multi-Agent Deep Deterministic Policy Gradient for dense scenarios"
 
 hyperparameters:
+  learning_rate: 0.001   # Critic/Network LR
   actor_lr: 0.0001
   critic_lr: 0.001
   gamma: 0.95
-  tau: 0.01             # Soft update parameter
+  tau: 0.01              # Soft update parameter
+  batch_size: 64
+  buffer_size: 100000
+  learning_starts: 2000
+
+  use_double_dqn: true
+  use_soft_update: true
+
+  epsilon_schedule: "linear"
+  exploration_fraction: 0.3
+  epsilon_start: 1.0
+  epsilon_end: 0.01
+  epsilon_decay: 0.995
+
+  hidden_size: 256
+  target_update_freq: 100
+
+  alpha_levels: 10
+  action_levels: 10
