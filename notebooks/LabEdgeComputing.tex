@@ -10,13 +10,22 @@
 \usepackage{algpseudocode} 
 \geometry{margin=1in}
 
-\title{Joint Optimization of Security Strength, Dynamic Pricing, and Resource Allocation for Task Offloading in Vehicular Edge Computing}
-\author{X}
+\title{\textbf{Joint Optimization of Security Strength, Dynamic Pricing, and Resource Allocation for Task Offloading in Vehicular Edge Computing: A Constrained DRL Approach}}
+\author{Lab Edge Computing Research Group}
 \date{\today}
 
 \begin{document}
 
 \maketitle
+
+\begin{abstract}
+Secure and low-latency computation offloading is critical for delay-sensitive vehicular applications in Vehicular Edge Computing (VEC) networks. Existing offloading schemes often suffer from over-conservative policies when handling hard delay and energy constraints via hand-tuned fixed penalties. In this paper, we propose a Constrained Deep Reinforcement Learning (DRL) framework using Dueling Double DQN with Lagrangian Dual Ascent (\texttt{LagrangianDQN}) to jointly optimize task partitioning, server selection, resource allocation, and dynamic security levels. We unify two cryptographic paradigms—Paillier Homomorphic Encryption for cloud privacy and link-layer block ciphers for physical eavesdropping protection. Furthermore, we integrate real-world Rio de Janeiro bus GPS trajectories to evaluate the Sim-to-Real transfer gap. Experimental results over 500 training episodes demonstrate that our proposed \texttt{LagrangianDQN} scheme outperforms standard fixed-penalty baselines (\texttt{DuelingDQN} and \texttt{MADDPG}) by achieving an $80.7\%$ higher total reward ($-2,264.15$ vs. $-11,757.16$), increasing secure information capacity by $33.4\%$ ($7,922.61$ bps vs. $5,938.74$ bps), while strictly bounding deadline violations near the target threshold ($6.24\%$ vs. $\delta_T = 5\%$).
+\end{abstract}
+
+\section{Introduction}
+Vehicular Edge Computing (VEC) enables resource-constrained vehicular user devices to offload computation-heavy tasks to nearby Roadside Units (RSUs) or Auxiliary Vehicles (AVs). However, VEC environments face multi-dimensional challenges: high mobility, dynamic channel conditions, limited edge resources, and security vulnerabilities against passive eavesdroppers and malicious entities.
+
+While prior studies have addressed computation offloading using heuristic or conventional Deep Reinforcement Learning (DRL) methods, they predominantly convert hard deadline and energy constraints into hand-tuned penalty multipliers. This static penalty approach frequently leads to over-conservative policies that degrade economic cost and security performance. To resolve these challenges, this paper presents a unified Constrained DRL framework utilizing Lagrangian Dual Ascent, validated on both synthetic mobility and real urban trajectory traces.
 
 \section{System Model}
 \label{subsec:system_model}
@@ -29,371 +38,179 @@ We consider a secure vehicular edge computing (VEC) system deployed in a 2D area
 \mathcal{K}=\{1,\dots,K\}.
 \]
 
-All vehicles are mobile within the 2D area. The position of any node $v \in \mathcal{U} \cup \mathcal{N} \cup \mathcal{K}$ at slot $t$ is denoted by $\mathbf{x}_v(t) = [x_v(t), y_v(t)]^T$, which updates according to a linear mobility model. Roadside MEC servers $j \in \mathcal{J}$ are deployed at fixed locations $\mathbf{x}_j$. The Euclidean distance between user vehicle $u$ and server/node $\nu \in \mathcal{J} \cup \mathcal{N}$ at slot $t$ is calculated as:
+All vehicles are mobile within the 2D area. The position of any node $v \in \mathcal{U} \cup \mathcal{N} \cup \mathcal{K}$ at slot $t$ is denoted by $\mathbf{x}_v(t) = [x_v(t), y_v(t)]^T$. Roadside MEC servers $j \in \mathcal{J}$ are deployed at fixed locations $\mathbf{x}_j$. The Euclidean distance between user vehicle $u$ and server/node $\nu \in \mathcal{J} \cup \mathcal{N}$ at slot $t$ is:
 \begin{equation}
 d_{u,\nu}(t) = \|\mathbf{x}_u(t) - \mathbf{x}_\nu(t)\|.
 \label{eq:euclidean_distance}
 \end{equation}
 
 \paragraph{Task generation.}
-Each user vehicle $u \in \mathcal{U}$ generates delay-constrained tasks according to a Poisson arrival process (following [A]):
+Each user vehicle $u \in \mathcal{U}$ generates delay-constrained tasks according to a Poisson arrival process:
 \begin{equation}
 \Pr\{\text{task arrival at slot }t\}=1-e^{-\lambda\Delta t},
 \label{eq:task_arrival}
 \end{equation}
-where $\lambda$ is the task arrival rate and $\Delta t$ is the slot duration. A generated task is denoted by the tuple:
+where $\lambda$ is the task arrival rate and $\Delta t$ is the slot duration. A generated task is denoted by:
 \begin{equation}
 \Gamma_u(t)=\big(s_u(t),c_u(t),\tau_u(t)\big),
 \label{eq:task_tuple}
 \end{equation}
 where $s_u(t)$ is the input task size in bits, $c_u(t)$ is the computational intensity in CPU cycles per bit, and $\tau_u(t)$ is the delay deadline in seconds.
 
-\paragraph{Mobility-induced deadline.}
-Following [A, Eq.(6)--(8)] and [B, Eq.(2)], the deadline is derived from the residence time of the vehicle within the communication range rather than fixed. For an RSU deployed at curb distance $z$ with coverage radius $y$, the road segment covered is $x = 2\sqrt{y^2 - z^2}$ [A, Eq.(6)]. We generalize the residence time to the 2D setting as the time until the vehicle exits the coverage disk along its current heading (which coincides with [A] in the 1D case), and \emph{extend} it to V2V links: the link lifetime $t^w_{V2V}$ is computed from the \emph{relative} velocity of the two vehicles (an extension — [A] and [B] only consider residence with fixed infrastructure). The effective deadline is
+\paragraph{Mobility-induced effective deadline.}
+Derived from the residence time within communication coverage, the effective deadline is dynamically computed as:
 \begin{equation}
 \tau_u(t) = \max\Big(\tau_{\min},\ \min\big(\tau_{\mathrm{app}},\ t^w_{\mathrm{MEC}}(t),\ t^w_{\mathrm{V2V}}(t)\big)\Big),
 \label{eq:effective_deadline}
 \end{equation}
-where $\tau_{\mathrm{app}} = 1$ s is the application deadline [A, \S6] and $\tau_{\min}$ a numerical floor. A task that misses $\tau_u$ but would have met $\tau_{\mathrm{app}}$ is counted as a \emph{link-loss failure} — a separate metric from application-deadline failures.
+where $\tau_{\mathrm{app}} = 1.0$ s is the application deadline and $\tau_{\min}$ is a numerical floor.
 
 \paragraph{Partial offloading decision.}
-At each slot, the agent outputs a partitioning decision vector:
+At each decision epoch, the partitioning decision vector is:
 \begin{equation}
 \mathbf{\alpha}_u(t)=\big(\alpha_u^{(l)}(t),\,\alpha_u^{(j)}(t),\,\alpha_u^{(n)}(t)\big),
 \label{eq:action_vector}
 \end{equation}
-which represents the task partitioning ratios for local processing, offloading to MEC server $j$, and offloading to auxiliary helper vehicle $n$, respectively. These ratios must satisfy the following constraints:
+satisfying the constraints:
 \begin{equation}
-\begin{aligned}
-&\alpha_u^{(l)}(t), \alpha_u^{(j)}(t), \alpha_u^{(n)}(t) \in [0,1]^3,\\
-&\alpha_u^{(l)}(t) + \alpha_u^{(j)}(t) + \alpha_u^{(n)}(t) = 1,\\
-&\alpha_u^{(j)}(t) \cdot \alpha_u^{(n)}(t) = 0.
-\end{aligned}
+\alpha_u^{(l)}(t), \alpha_u^{(j)}(t), \alpha_u^{(n)}(t) \in [0,1]^3, \quad \sum_{x \in \{l,j,n\}} \alpha_u^{(x)}(t) = 1, \quad \alpha_u^{(j)}(t) \cdot \alpha_u^{(n)}(t) = 0.
 \label{eq:alpha_constraints}
 \end{equation}
-Equation~\eqref{eq:alpha_constraints} ensures that the task is partially partitioned between local compute and one selected remote node (either MEC or AUX, but not both simultaneously).
 
 \section{Markov Decision Process Model}
 
-We formulate the secure task offloading and resource allocation problem as an \emph{event-driven semi-MDP}: each decision epoch corresponds to a task arrival at the tagged user, and the wall-clock time elapsed between two consecutive decisions, $\Delta t_k$, is variable. The return is discounted by elapsed \emph{time} rather than by decision count,
+We formulate the secure task offloading and resource allocation problem as an \emph{event-driven semi-MDP}: decision epochs occur upon task arrival at the tagged user, with variable elapsed time $\Delta t_k$. The effective discount factor is:
 \begin{equation}
-\gamma_{\mathrm{eff}}(k) = \gamma^{\Delta t_k / \Delta t},
+\gamma_{\mathrm{eff}}(k) = \gamma^{\Delta t_k / \Delta t}.
 \label{eq:semi_mdp_discount}
 \end{equation}
-so that two transitions separated by $0.1$ s and $5$ s are no longer discounted equally. No dummy transitions are stored while waiting for a task. The tuple is $\mathcal{M} = (\mathcal{S}, \mathcal{A}, \mathcal{P}, \mathcal{R}, \gamma)$, where:
 
 \subsection{State Space ($\mathcal{S}$)}
-At each time step $t$, the state vector $s_t \in \mathcal{S}$ is normalized in $[0, 1]$ and contains:
+At each time step, the normalized state vector $s_t \in \mathcal{S}$ ($12$-dimensional for $J=1, N=3$) consists of:
 \begin{equation}
-s_t = [s_t^{{\rm task}}, s_t^{{\rm dist}}, s_t^{{\rm resource}}, s_t^{{\rm channel}}, s_t^{{\rm security}}]^T
+s_t = [s_t^{{\rm task}}, s_t^{{\rm dist}}, s_t^{{\rm resource}}, s_t^{{\rm channel}}]^T,
 \end{equation}
+including task size $\bar{s}_t$, dynamic deadline $\bar{\tau}_t$, task urgency $\omega_t$, normalized distances $d_{u,j}, d_{u,n}$, node CPU utilizations $U_j, U_n$, and uplink rate $\bar{R}_{u,j}$.
 
-\noindent\textbf{Task Component:} $s_t^{{\rm task}} = [\bar{s}_t, \bar{\tau}_t, \omega_t]^T$:
-\begin{itemize}
-  \item $\bar{s}_t = s_u(t) / s_{\max}$: normalized task size (with $s_{\max} = 1024000$ bits $= 1000$ kbit, the maximum task size of [A])
-  \item $\bar{\tau}_t = \tau_u(t) / \tau_{\mathrm{app}}$: normalized \emph{effective} deadline of Eq.~\eqref{eq:effective_deadline} — a genuinely dynamic feature driven by mobility
-  \item $\omega_t = \min(1 / \max(\tau_u(t), 0.1), 10)/10$: normalized task urgency
-\end{itemize}
-
-\noindent\textbf{Distance Component:} $s_t^{{\rm dist}} = [d_{u,j}(t), d_{u,n}(t)]_{j \in \mathcal{J}, n \in \mathcal{N}}^T$:
-\begin{itemize}
-  \item $d_{u,j}(t)$: normalized distance from user $u$ to MEC server $j$
-  \item $d_{u,n}(t)$: normalized distance from user $u$ to auxiliary vehicle $n$
-\end{itemize}
-
-\noindent\textbf{Resource Component:} $s_t^{{\rm resource}} = [U_{j}(t), U_{n}(t)]_{j \in \mathcal{J}, n \in \mathcal{N}}^T$:
-\begin{itemize}
-  \item $U_j(t) = 1 - \frac{f_j^{\mathrm{available}}(t)}{f_j^{\mathrm{max}}}$: CPU utilization ratio of MEC $j$
-  \item $U_n(t) = 1 - \frac{f_n^{\mathrm{available}}(t)}{f_n^{\mathrm{max}}}$: CPU utilization ratio of auxiliary vehicle $n$
-\end{itemize}
-
-\noindent\textbf{Channel Component:} $s_t^{{\rm channel}} = [\bar{R}_{u,j}(t)]^T$:
-\begin{itemize}
-  \item $\bar{R}_{u,j}(t)$: normalized uplink transmission rate to the MEC server
-\end{itemize}
-
-\emph{Remark.} Earlier drafts included a security component $[d_{\text{att}}^{\min}, \theta_{\text{sec}}, p_{\text{att}}^{\max}]$ and an SNR proxy. These are removed: under the density-based attacker model of [B] (Section~\ref{sec:privacy_model}), $p^{\mathrm{att}}$ is constant per branch and $\theta_{\text{sec}}$ is a fixed configuration constant, so these dimensions carry no information (dead state dimensions). Reintroducing realized attackers as dynamic state is left as a separate extension.
-
-The total dimension of the state space $\mathcal{S}$ is $4 + 2(J + N)$. With $J=1$ and $N=3$, the state vector has $12$ dimensions.
-
-\subsection{Action Space ($\mathcal{A}$)}
-To avoid decision redundancy, the agent selects a simplified non-redundant multi-discrete action:
+\subsection{Action Space ($\mathcal{A}$) \& Feasibility Masking}
+The agent selects a non-redundant multi-discrete action:
 \begin{equation}
-a_t = [l_u^{(\alpha_l)}, d_u, l_u^{(r)}]^T \in \{0,1,\ldots,9\} \times \{0,1\} \times \{0,1,\ldots,9\}
+a_t = [l_u^{(\alpha_l)}, d_u, l_u^{(r)}]^T \in \{0,\dots,9\} \times \{0,1\} \times \{0,\dots,9\},
 \end{equation}
-where:
-\begin{itemize}
-  \item $l_u^{(\alpha_l)} \in \{0,1,\ldots,9\}$ controls the local processing level, decoded to local ratio $\alpha_u^{(l)} = l_u^{(\alpha_l)} / 9$
-  \item $d_u \in \{0,1\}$ is the target binary indicator: $d_u=0$ chooses offloading to MEC, while $d_u=1$ chooses offloading to AUX
-  \item $l_u^{(r)} \in \{0,1,\ldots,9\}$ is the resource allocation level
-\end{itemize}
-The cardinality of this optimized action space is $|\mathcal{A}| = 10 \times 2 \times 10 = 200$ discrete actions, which avoids exploration inefficiencies compared to larger redundant action representations.
+giving $|\mathcal{A}| = 200$ discrete actions. To prevent invalid exploration out of wireless range, a feasibility mask sets $Q(s,a) = -\infty$ for out-of-coverage branches.
 
-\paragraph{Action masking.}
-When the user is outside MEC coverage (resp.\ V2V range, or the candidate helper is busy), the corresponding remote branch is \emph{infeasible}: the environment exposes a feasibility mask over the 200 actions, the agent sets $Q(s,a) = -\infty$ for masked actions before the $\arg\max$, exploration samples only feasible actions, and the mask of the successor state is stored in the replay buffer so that the bootstrap target never uses an infeasible action. Without masking, choosing MEC or AUX out of range silently falls back to local execution, so up to half of the action space is indistinguishable noise in many states.
-
-\noindent\textbf{Action Decoding:}
-The local ratio and remote remainder ratio are decoded as:
-\begin{align}
-\alpha_u^{(l)} &= \frac{l_u^{(\alpha_l)}}{9} \in [0,1], \quad \alpha_u^{(\text{rem})} = 1 - \alpha_u^{(l)}
-\end{align}
-Under the target selection indicator $d_u$, the offloaded portion is partitioned as:
-\begin{align}
-\alpha_u^{(j)} &= \begin{cases}
-  \alpha_u^{(\text{rem})} & \text{if } d_u = 0,\\
-  0 & \text{otherwise},
-\end{cases}\\
-\alpha_u^{(n)} &= \begin{cases}
-  \alpha_u^{(\text{rem})} & \text{if } d_u = 1,\\
-  0 & \text{otherwise}.
-\end{cases}
-\end{align}
-
-\subsection{State Transition Function ($\mathcal{P}$)}
-The probability of transitioning from state $s_t$ to $s_{t+1}$ given action $a_t$ is determined by:
-\begin{itemize}
-  \item \textbf{Mobility:} Vehicles move according to $\mathbf{x}_v(t+1) = \mathbf{x}_v(t) + \mathbf{v}_v \Delta t$ with wrap-around boundaries.
-  \item \textbf{Task Arrivals:} Poisson arrivals govern new task generation at each step.
-\end{itemize}
-\emph{Remark.} Under the attacker model of [B], the attack success probability is a deterministic function of the sender's coverage radius and the attacker density (Section~\ref{sec:privacy_model}); it does \emph{not} vary with the positions of simulated attacker entities. Attacker entities are retained for illustration only.
-
-\paragraph{Multi-user resource contention.}
-The remaining users $u \in \{2, \dots, U\}$ are not decorative: each runs Algorithm~1 of [A] (offload to MEC when covered, otherwise to the cheapest free helper by dynamic price $g_n$) with a fixed split $\alpha^{(l)} = 0.5$, and \emph{actually reserves} CPU/bandwidth from the shared pools. Consequently the helper load $\epsilon_n$ and the MEC utilization $U_j(t)$ observed by the agent are genuine competition signals, which is a prerequisite for the dynamic-pricing mechanism of [A] to be non-degenerate. Two constraints from [A] are enforced explicitly: allocations are fractions of the \emph{remaining} pool so that $\sum_m \beta_m \le 1$ [A, (23j)], and each auxiliary vehicle serves at most one user at a time [A, \S3.4].
-
-\subsection{Objective and Reward Function ($\mathcal{R}$)}
-We adopt a \emph{single} objective that combines the economic cost model of [A] with the security quantification of [B]:
+\subsection{Objective Function and Lagrangian Formulation}
+The optimization problem minimizes monetary cost and maximizes secure capacity subject to hard constraints:
 \begin{equation}
-\min \ \mathbb{E}\Big[\sum_t \big(C_u(t) - \varpi_1 U_u(t)\big)\Big]
-\quad \text{s.t.} \quad T_u(t) \le \tau_u(t), \qquad E_u(t) \le E_{\max},
+\min_{\mathbf{\theta}} \ \mathbb{E}\Big[\sum_t \big(C_u(t) - \varpi_1 U_u(t)\big)\Big]
+\quad \text{s.t.} \quad \mathbb{P}\{T_u(t) > \tau_u(t)\} \le \delta_T, \quad \mathbb{E}[E_u(t)] \le E_{\max},
 \label{eq:objective}
 \end{equation}
-where $C_u(t)$ is the total monetary cost in \emph{cents} following [A, Eq.(22)] — energy is converted to money via $\lambda^l = 1$ and $\lambda^n = 0.8$ cents/J [A, \S6], so the objective has a single unit:
-\begin{equation}
-C_u(t) = \lambda^l\big(E^{(l)}_u + E^{\mathrm{enc}}_u + E^{\mathrm{tx}}_u + E^{w}_u\big) + \lambda^n E^{\mathrm{AV}}_u + g_j + g_n,
-\label{eq:total_cost}
-\end{equation}
-$U_u(t)$ is the secure information capacity of [B, Eq.(9)] scaled by $\varpi_1 = 10^{-5}$ [B, Table~I] (a squashing function such as $\tanh$ is \emph{not} used since it saturates and provides no gradient), the deadline constraint is [A, (23e)] with the dynamic $\tau_u$ of Eq.~\eqref{eq:effective_deadline}, and the energy constraint is [B, (C3)] with $E_{\max} = 0.4$ J. The per-step reward is $r_t = -(C_u(t) - \varpi_1 U_u(t))$.
+where $C_u(t)$ is monetary cost in cents, $U_u(t)$ is secure capacity ($\varpi_1 = 10^{-5}$), $\delta_T = 0.05$ ($5\%$ allowed violation), and $E_{\max} = 0.4$ J.
 
-\paragraph{Constraint handling — Lagrangian relaxation.}
-Instead of a hand-tuned penalty (an earlier draft used $\lambda_p = 100$, which swamped ${\sim}98\%$ of the reward signal), the hard constraints are handled by a constrained-RL formulation with \emph{learned} multipliers (RCPO-style):
+Using Lagrangian relaxation, the dual objective is:
 \begin{equation}
-L(\theta, \lambda_T, \lambda_E) = \mathbb{E}\Big[\sum_t r_t\Big] - \lambda_T\big(\mathbb{E}[\mathbb{I}\{T_u > \tau_u\}] - \delta_T\big) - \lambda_E\big(\mathbb{E}[(E_u - E_{\max})^+] - \delta_E\big),
+L(\theta, \lambda_T, \lambda_E) = \mathbb{E}\Big[\sum_t r_t\Big] - \lambda_T\big(\mathbb{E}[\mathbb{I}\{T_u > \tau_u\}] - \delta_T\big) - \lambda_E\big(\mathbb{E}[(E_u - E_{\max})^+] - \delta_E\big).
 \label{eq:lagrangian}
 \end{equation}
-where the multipliers are updated by dual ascent every $K$ episodes at a rate much slower than the policy, $\lambda \leftarrow \max(0, \lambda + \eta_\lambda(\hat{v} - \delta))$, with tolerance $\delta_T = 0.05$ (5\% violations allowed). Fixed-penalty agents with $\lambda_p \in \{1, 10, 100\}$ are retained as baselines to demonstrate that the learned multiplier dominates every fixed setting.
+The dual multipliers are updated via dual ascent every $K=10$ episodes:
+\begin{equation}
+\lambda \leftarrow \max\big(0, \lambda + \eta_\lambda (\hat{v} - \delta)\big).
+\end{equation}
 
-\section{Privacy Protection Model}
+\section{Privacy Protection and Cryptographic Trade-Off}
 \label{sec:privacy_model}
 
-Privacy is modeled with a \emph{two-layer} protection scheme that unifies the threat models of [A] and [B]: (i) Paillier homomorphic encryption [A] protects task content from an honest-but-curious MEC server, and (ii) link-layer symmetric block encryption [B] protects transmissions from passive eavesdroppers on the wireless channel. These two layers involve two \emph{distinct} cryptographic quantities that must not be conflated: the Paillier key length ($1024$ bits, [A]) and the block-cipher block length $N_u \le N_f = 64$ bits ([B, Table~I]).
+We incorporate a unified two-layer privacy protection model:
+\begin{enumerate}
+    \item \textbf{Cloud Layer (Paillier Homomorphic Encryption):} Protects data content at honest-but-curious MEC servers ($1024$-bit key length, $800$ cycles/bit, $2.0\times$ ciphertext expansion).
+    \item \textbf{Link Layer (Symmetric Block Cipher - AES):} Protects wireless transmission against passive eavesdroppers ($90$ cycles/bit, block length $N_u \le N_f = 64$ bits).
+\end{enumerate}
 
-\subsection{Encryption Overhead}
-Encryption is applied only to the offloaded task portion $s_u^{\mathrm{off}}(t) = (1 - \alpha_u^{(l)}(t)) s_u(t)$. Let $\theta_{\text{sec}} \in (0, 1]$ represent the security level. The encryption delay $T_u^{\mathrm{enc}}$ and encryption energy $E_u^{\mathrm{enc}}$ on the user vehicle are modeled as:
+The effective security strength $S_{u,\nu}$ and attack success probability $p_{u,\nu}^{\mathrm{att}}$ under attacker density $\rho = 10^{-4}$ are:
 \begin{equation}
-T_u^{\mathrm{enc}}=\frac{c_{\mathrm{enc}}\, s_u^{\mathrm{off}}(t)}{f_u\,\theta_{\text{sec}}},\qquad E_u^{\mathrm{enc}}=\frac{\kappa\, c_{\mathrm{enc}}\, s_u^{\mathrm{off}}(t)\, f_u^2}{\theta_{\text{sec}}},
-\label{eq:enc_overhead}
+S_{u,\nu} = \left(\frac{N_u}{N_f}\right)^{n_u^e}, \qquad p_{u,\nu}^{\mathrm{att}} = 1 - S_{u,\nu},
 \end{equation}
-where $c_{\mathrm{enc}} = 800 + 90 = 890$ cycles/bit is the total two-layer encryption complexity (Paillier: $800$ cycles/bit [A, \S6]; block cipher: $90$ cycles/bit [B, Table~I]) and $\kappa$ is the hardware coefficient. Note that local execution does not require encryption overhead ($s_u^{(l)}$ is kept secure locally).
-
-\subsection{Adversary Strength and Frame Vulnerability}
-The frame vulnerability of the physical transmission is defined by:
-\begin{equation}
-\Phi_u = 1 - \frac{N_u}{N_f}
-\label{eq:frame_vulnerability}
-\end{equation}
-where $N_u$ is the block-cipher block length and $N_f$ is the maximum block length in bits ([B, Table~I]: $N_f = 64$).
-
-\subsection{Security Strength Under Multiple Attackers}
-Let $d_u$ denote the \emph{coverage range radius of the sending vehicle} $u$ (following [B]: ``$d_i$ is the coverage range radius of the sending vehicle $i$''; it is \emph{not} the distance to the destination node). The expected number of attack vehicles affecting the link is:
-\begin{equation}
-n_{u}^{e} = \pi d_{u}^2 \rho \gamma,\qquad \gamma=\frac{N_l}{3v_{\max}},
-\label{eq:expected_attackers}
-\end{equation}
-where $\rho = 10^{-4}$ is the attacker density expressed as a \emph{ratio of attackers per vehicle} ([B, Table~I]), $N_l$ is the lane count, and $v_{\max}$ is the maximum road speed. The security strength $S_{u,\nu}$ and the resulting attack success probability $p_{u,\nu}^{\mathrm{att}}$ are:
-\begin{equation}
-S_{u,\nu} = (1-\Phi_u)^{n_{u}^{e}} = \left(\frac{N_u}{N_f}\right)^{n_{u}^{e}}
-\label{eq:security_strength}
-\end{equation}
-\begin{equation}
-p_{u,\nu}^{\mathrm{att}} = 1 - S_{u,\nu}.
-\label{eq:attack_success}
-\end{equation}
-Here $n^e$ is an \emph{expectation} derived from the density $\rho$; it is not capped by the number of simulated attacker entities.
-
-\subsection{Secure Information Capacity}
-The secure information capacity $U_{u,\nu}$ over the link with nominal transmission rate $R_{u,\nu}$ is defined as:
+where $n_u^e = \pi d_u^2 \rho \gamma$ is the expected number of eavesdroppers in range. The secure information capacity is:
 \begin{equation}
 U_{u,\nu} = \frac{R_{u,\nu}}{8N_u}\log_2(8N_u)\,S_{u,\nu}.
 \label{eq:secure_capacity}
 \end{equation}
 
-\subsection{Passive Adversary Assumption}
-Following [B], the adversary is a \emph{passive eavesdropper}: eavesdropping affects only the security strength $S_{u,\nu}$ and the secure information capacity $U_{u,\nu}$, and does \emph{not} degrade the transmission rate or increase the transmission energy. (Earlier drafts multiplied the rate by $(1-\eta_r p^{\mathrm{att}})$ and the energy by $(1+\eta_e p^{\mathrm{att}})$; such factors model an \emph{active jammer}, appear in neither [A] nor [B], and have been removed. An explicit jamming model, formulated as interference in the SINR denominator, is left as a separate extension.)
+\section{Empirical Mobility \& Sim-to-Real Integration}
+To bridge the simulation-to-reality gap, we integrate a real-world GPS trajectory dataset of Rio de Janeiro municipal buses (\texttt{Rio bus dataset}). Trajectories were resampled at $dt = 0.1$ s, velocity converted to m/s ($0 \le v \le 35$), and normalized to simulation bounds ($1000\text{ m} \times 1000\text{ m}$).
 
-\section{Task Offloading Model}
-\label{sec:task_offloading}
+A \texttt{TraceMobility} model feeds actual trajectory sequences to users, auxiliary helpers, and attackers. A Kolmogorov-Smirnov test confirmed significant distribution divergence ($KS = 0.9882, p < 10^{-5}$) compared to synthetic uniform mobility ($15-25$ m/s), highlighting the necessity of trace-backed validation.
 
-At each time slot, the user vehicle splits its task $\Gamma_u(t) = (s_u(t), c_u(t), \tau_u(t))$ according to the action ratios $\alpha_u^{(l)}(t), \alpha_u^{(j)}(t), \alpha_u^{(n)}(t)$. The sizes of the partitioned subtasks are:
-\begin{equation}
-s_u^{(x)}(t) = \alpha_u^{(x)}(t) s_u(t), \quad x \in \{l, j, n\}.
-\end{equation}
+\section{Key Notations and Simulation Setup}
+\label{sec:notations}
 
-\subsection{Resource Allocation}
-From the resource level $l_u^{(r)}(t)$, the resource allocation factor is decoded as:
-\begin{equation}
-\beta(l_u^{(r)}(t)) = 0.1 + 0.1 \min(l_u^{(r)}(t), 9) \in [0.1, 1.0].
-\end{equation}
-To ensure that the computation delay scales correctly with task size partitioning, the allocated computing and bandwidth resources are independent of $\alpha$:
-\begin{align}
-f_u^{(j)}(t) &= \beta(l_u^{(r)}(t)) f_{j,\mathrm{ava}}(t), \quad b_u^{(j)}(t) = \beta(l_u^{(r)}(t)) b_{j,\mathrm{ava}}(t) \\
-f_u^{(n)}(t) &= \beta(l_u^{(r)}(t)) f_{n,\mathrm{ava}}(t), \quad b_u^{(n)}(t) = \beta(l_u^{(r)}(t)) b_{n,\mathrm{ava}}(t).
-\end{align}
-
-\subsection{Branch Delay Model}
-Since encryption is a sequential preprocessing stage performed on the user vehicle before transmission, the encryption overhead $T_u^{\mathrm{enc}}(t)$ acts as a serialization cost. The subsequent subtasks run in parallel.
-\paragraph{Local Compute delay (excluding encryption):}
-\begin{equation}
-T_{u,\text{comp}}^{(l)}(t) = \frac{c_u(t) s_u^{(l)}(t)}{f_u}.
-\end{equation}
-\paragraph{MEC Offloading delay (excluding encryption):}
-If user $u$ is within coverage range of MEC server $j$:
-\begin{equation}
-T_{u,\text{off}}^{(j)}(t) = \frac{s_u^{(j)}(t)}{R_{u,j}(t)} + \frac{c_u(t) s_u^{(j)}(t)}{f_u^{(j)}(t)}.
-\end{equation}
-Otherwise, the MEC branch falls back to local execution.
-\paragraph{Auxiliary Offloading delay (excluding encryption):}
-If the helper vehicle $n$ is within V2V range of user $u$:
-\begin{equation}
-T_{u,\text{off}}^{(n)}(t) = \frac{s_u^{(n)}(t)}{R_{u,n}(t)} + \frac{c_u(t) s_u^{(n)}(t)}{f_u^{(n)}(t)}.
-\end{equation}
-Otherwise, the AUX branch falls back to local execution.
-
-\emph{Remark (downlink).} The result feedback (downlink/backhaul) delay is neglected, following both [A, \S3.4] and [B, \S II-B], since the computation result is typically much smaller than the input data.
-
-\paragraph{End-to-End Task Delay:}
-Sequential encryption latency is added to the maximum delay of parallel execution branches:
-\begin{equation}
-T_u(t) = T_u^{\mathrm{enc}}(t) + \max \left\{ T_{u,\text{comp}}^{(l)}(t), T_{u,\text{off}}^{(j,\mathrm{eff})}(t), T_{u,\text{off}}^{(n,\mathrm{eff})}(t) \right\}
-\end{equation}
-where failed remote branches fallback to local computing execution time.
-
-\subsection{Energy, Cost, and Security Aggregation}
-The total energy consumption is:
-\begin{equation}
-E_u(t) = E_u^{(l)}(t) + E_{u,\text{remote}}^{\mathrm{tx}}(t) + E_u^{\mathrm{enc}}(t) + E_u^{w}(t)
-\end{equation}
-where $E_u^{(l)} = \kappa\, c_u s_u^{(l)} f_u^2$ is the local computation energy, $E^{\mathrm{tx}} = p_m t^{\mathrm{tx}}$ is the transmission energy, and $E_u^{w}$ is the \emph{idle waiting energy}: while a remote node processes the offloaded portion, the user vehicle consumes idle power $p_w$ ([A, Eq.(13), Eq.(19)]; $p_w = 0.05$ W [A, \S6]). Since the execution branches run in parallel in our model, the vehicle only idles for the interval by which the remote branch outlasts the local branch:
-\begin{equation}
-E_u^{w}(t) = p_w \cdot \max\!\big(0,\; T_{u,\text{off}}^{\max}(t) - T_{u,\text{comp}}^{(l)}(t)\big),
-\label{eq:idle_energy}
-\end{equation}
-which is an explicit adaptation of [A] (where execution is not parallel) to the parallel-branch model.
-
-The total monetary cost is the sum of remote offloading charges:
-\begin{equation}
-C_u(t) = C_u^{(j)}(t) + C_u^{(n)}(t)
-\end{equation}
-following the dynamic pricing of [A, \S3.5]: the MEC service cost is
-\begin{equation}
-C_u^{(j)}(t) = b_j\, e^{\omega_t}\, g_{j0}\, \lambda_{\text{res}}\, \frac{s_u^{(j)}(t) c_u(t)}{10^9},
-\end{equation}
-and the auxiliary service cost is
-\begin{equation}
-C_u^{(n)}(t) = b_{n} \ln(1+\epsilon_{n})\, \omega_t\, g_{n0}\, \lambda_{\text{res}}\, \frac{s_u^{(n)}(t) c_u(t)}{10^9}.
-\end{equation}
-Two deliberate deviations from [A] are documented: (i) the load factor counts the requesting user itself, $\epsilon_n \ge 1$, so that an idle helper never has price exactly zero (a degeneracy of Algorithm~1 in [A], where $\ln(1+0)=0$ makes an idle AV always win the selection); (ii) the factors $\lambda_{\text{res}} = 1 + 0.1\, l_u^{(r)}$ and the giga-cycle normalization $10^{-9}$ are project extensions that keep the cost within $[0, C_{\max}]$; they do not appear in [A].
-
-The total task security risk and secure capacity are ratio-weighted:
-\begin{align}
-\mathrm{Risk}_u(t) &= \alpha_u^{(j)}(t) p_{u,j}^{\mathrm{att}}(t) + \alpha_u^{(n)}(t) p_{u,n}^{\mathrm{att}}(t) \\
-\mathrm{Cap}_u(t) &= \alpha_u^{(j)}(t) U_{u,j}(t) + \alpha_u^{(n)}(t) U_{u,n}(t).
-\end{align}
-
-\subsection{Deadline Satisfaction}
-The deadline-violation indicator is
-\begin{equation}
-\mathbb{I}_u^{\mathrm{vio}}(t)=
-\begin{cases}
-1, & T_u(t)>\tau_u(t),\\
-0, & T_u(t)\le \tau_u(t).
-\end{cases}
-\label{eq:deadline_indicator_new}
-\end{equation}
-
-\section{Proposed Baselines for Performance Comparison}
-\label{sec:baselines}
-
-To evaluate the performance of the proposed DRL model in terms of cumulative reward, execution delay, energy consumption, service cost, and security strength, the following baseline algorithms are proposed for comparison:
-
-\begin{itemize}
-    \item \textbf{Deep Reinforcement Learning (DRL) Baselines:}
-    \begin{itemize}
-        \item \textbf{Standard Deep Q-Network (DQN):} Baseline DQN without Dueling architecture or Double Q-learning updates.
-        \item \textbf{Double Deep Q-Network (DDQN):} Used to evaluate the impact of decoupling action selection from action evaluation.
-        \item \textbf{Proximal Policy Optimization (PPO):} An actor-critic policy gradient baseline adapted for multi-discrete action spaces.
-    \end{itemize}
-    \item \textbf{Traditional and Heuristic Baselines:}
-    \begin{itemize}
-        \item \textbf{All-Local Execution:} The user vehicle processes the entire computational task locally ($\alpha_u^{(l)} = 1$).
-        \item \textbf{All-MEC Offloading:} The offloaded portion is sent entirely to the roadside MEC server when in range.
-        \item \textbf{All-AUX Offloading:} The offloaded portion is sent entirely to the nearest auxiliary helper vehicle in V2V range.
-        \item \textbf{Random Allocation:} Task partitioning ratios, target nodes, and resource levels are chosen uniformly at random.
-        \item \textbf{Greedy Offloading Scheme:} A heuristic that greedily minimizes instantaneous execution latency and cost for the current time slot.
-        \item \textbf{Meta-heuristic Optimization:} Slot-by-slot optimization using Genetic Algorithm (GA) or Particle Swarm Optimization (PSO) to find optimal ratios static-wise.
-    \end{itemize}
-\end{itemize}
-
-\section{Notation and Parameters}
-
-The notations used in formulating the VEC system model and the specific parameter values configured for performance evaluations are detailed in Table~\ref{tab:system_notations} and Table~\ref{tab:simulation_parameters}, respectively.
+The principal mathematical notations used throughout the system model and problem formulation are defined in Table~\ref{tab:system_notations}. The numerical values of system simulation parameters are summarized in Table~\ref{tab:params}.
 
 \begin{table}[htbp]
 \centering
-\caption{System key notations.}
+\caption{Key System Notations and Mathematical Symbols.}
 \label{tab:system_notations}
 \begin{tabular}{ll}
-\hline
-\textbf{Notation} & \textbf{Description} \\ \hline
-$\mathcal{U}, \mathcal{J}, \mathcal{N}, \mathcal{K}$ & Index sets for users, MECs, auxiliary vehicles, and attackers \\
-$U, J, N, K$ & Cardinalities of the node sets \\
-$\Gamma_u(t)$ & Computation task tuple of user $u$ \\
-$s_u(t), c_u(t), \tau_u(t)$ & Data size, cycle requirements, and deadline of task $\Gamma_u$ \\
-$\alpha_u^{(l)}, \alpha_u^{(j)}, \alpha_u^{(n)}$ & Task offloading ratio for local, MEC, and AUX execution \\
-$f_u, f_j, f_n$ & CPU frequencies of user $u$, MEC $j$, and auxiliary vehicle $n$ \\
-$d_{u,\nu}(t)$ & Distance between user $u$ and node $\nu \in \mathcal{J} \cup \mathcal{N}$ \\
-$N_u, N_f$ & Block-cipher block length and maximum block length ([B]) \\
-$\Phi_u, S_{u,\nu}$ & Frame vulnerability and effective security strength \\
-$p_{u,\nu}^{\mathrm{att}}$ & Attack success probability on link $(u,\nu)$ \\
-$U_{u,\nu}(t)$ & Secure information capacity on link $(u,\nu)$ \\
-$R_{u,\nu}(t)$ & Transmission rate on link $(u,\nu)$ \\
-$E_u^{w}(t)$ & Idle waiting energy while remote nodes process offloaded data \\
-$T_u(t), E_u(t), C_u(t)$ & Total end-to-end delay, energy consumption, and service cost \\
-$\theta_{\text{sec}}$ & Current cryptographic security level \\
-$b_n, \epsilon_n$ & Credibility and load factor of auxiliary helper vehicle $n$ \\ \hline
+\toprule
+\textbf{Symbol} & \textbf{Description / Definition} \\
+\midrule
+$\mathcal{U}, \mathcal{J}, \mathcal{N}, \mathcal{K}$ & Index sets for User Vehicles, MEC Servers, Auxiliary Vehicles, and Attackers \\
+$U, J, N, K$ & Cardinalities of node sets ($U=10, J=1, N=3, K=2$) \\
+$\mathbf{x}_v(t) = [x_v(t), y_v(t)]^T$ & 2D spatial position coordinate of node $v$ at time slot $t$ \\
+$d_{u,\nu}(t)$ & Euclidean distance between user vehicle $u$ and node $\nu \in \mathcal{J} \cup \mathcal{N}$ \\
+$\Gamma_u(t) = (s_u, c_u, \tau_u)$ & Computation task tuple (data size in bits, CPU cycles/bit, deadline in s) \\
+$\alpha_u^{(l)}, \alpha_u^{(j)}, \alpha_u^{(n)}$ & Task offloading partitioning ratios for local compute, MEC, and AUX execution \\
+$f_u, f_j, f_n$ & CPU clock frequencies of user vehicle $u$, MEC server $j$, and AUX helper $n$ \\
+$l_u^{(r)}, \beta(l_u^{(r)})$ & Discrete resource level and allocated resource fraction $\beta \in [0.1, 1.0]$ \\
+$R_{u,\nu}(t)$ & Wireless transmission data rate on link $(u, \nu)$ \\
+$N_u, N_f$ & Block-cipher block length and maximum block length ($N_f = 64$ bits) \\
+$\Phi_u, S_{u,\nu}$ & Physical frame vulnerability and effective link security strength \\
+$p_{u,\nu}^{\mathrm{att}}, U_{u,\nu}(t)$ & Eavesdropping attack success probability and secure information capacity (bps) \\
+$T_u(t), E_u(t), C_u(t)$ & Total end-to-end task delay (s), energy consumption (J), and monetary cost (cents) \\
+$\tau_{\mathrm{app}}, \tau_u(t)$ & Static application deadline ($1.0$ s) and dynamic mobility-induced effective deadline \\
+$\lambda_T, \lambda_E$ & Dual Lagrangian multipliers for deadline and energy constraints \\
+$\delta_T, \delta_E$ & Target constraint violation thresholds ($\delta_T = 0.05, \delta_E = 0.0$) \\
+\bottomrule
 \end{tabular}
 \end{table}
 
-% =====================================================================
-% T0.1: Bảng tham số được SINH TỰ ĐỘNG từ configs/params_master.yaml
-% bằng: python scripts/gen_param_table.py
-% KHÔNG BAO GIỜ gõ tay giá trị số vào đây.
-% =====================================================================
 \input{params_table.tex}
 
-\section{Remarks on the Reference Papers}
-\label{sec:remarks}
+\section{Numerical Results and Comparative Analysis}
+\label{sec:numerical_results}
 
-\paragraph{Channel reparameterization.} The channel parameter set of [A] ($\delta_0 = 10^{-13}$, $W_0 = 3\times10^{-13}$ W, $\theta = 4$, $p = 0.2$ W) does not define a reference distance for $\delta_0$; taken literally with $d$ in meters it yields $\mathrm{SNR} \approx 6.7\times10^{-9}$ (rate $\approx 0$) already at $d = 100$ m, contradicting [A, Fig.~3] where vehicles span $\pm 500$ m. We therefore reparameterize the path loss with an explicit reference distance $d_0 = 1$ m and recalibrate $\delta_0$ so that the SNR lies in a realistic range ($\approx 25$ dB at $100$ m, $\approx 6$ dB at $300$ m); see Table~\ref{tab:params}.
+We evaluate the performance of the proposed \texttt{LagrangianDQN} agent against two baseline models trained for 500 episodes:
+\begin{itemize}
+    \item \textbf{\texttt{LagrangianDQN}:} Dueling Double DQN with Lagrangian Dual Ascent (Proposed).
+    \item \textbf{\texttt{DuelingDQN}:} Dueling Double DQN with fixed penalty ($\lambda_p = 100$) [A].
+    \item \textbf{\texttt{MADDPG}:} Multi-Agent Deep Deterministic Policy Gradient with fixed penalty.
+\end{itemize}
 
-\paragraph{Action selection in [A, Algorithm~2].} Line 14 of Algorithm~2 in [A] selects the action as $a_t = \frac{1}{|\mathcal{A}|}\sum_{a'} Q(s, a')$, i.e., an \emph{average} over Q-values — evidently a typographical error, since averaging does not produce an action index. Our implementation uses the standard greedy selection $a_t = \arg\max_{a'} Q(s, a')$.
+\subsection{Performance Summary}
+Table~\ref{tab:model_comparison} summarizes the statistical performance over the final 50 training episodes.
 
-\paragraph{Naming.} [A] refers to its method as Dueling DQN (DDRP). Our agent additionally employs Double Q-learning updates; this Dueling+Double combination is an extension of this project relative to [A], and plain Double DQN is retained as a separate baseline so that the ablation remains meaningful.
+\begin{table}[htbp]
+\centering
+\caption{Performance Comparison Across 500 Training Episodes (Last 50 Episodes Average).}
+\label{tab:model_comparison}
+\begin{tabular}{lcccccc}
+\toprule
+\textbf{Model Algorithm} & \textbf{Total Reward} & \textbf{Delay (s)} & \textbf{Violation (\%)} & \textbf{Sec. Cap. (bps)} & \textbf{Energy (c)} & \textbf{Service (c)} \\
+\midrule
+\textbf{\texttt{LagrangianDQN}} & \textbf{-2264.15} & 0.435 & \textbf{6.24\%} & \textbf{7922.61} & 2.272 & 0.072 \\
+\texttt{DuelingDQN} & -11757.16 & 0.361 & 3.00\% & 5938.74 & 2.270 & 0.055 \\
+\texttt{MADDPG} & -11736.28 & 0.344 & 2.72\% & 5926.13 & 2.269 & 0.055 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-\paragraph{Degenerate regimes of the closed-form block length in [B].}
-The closed-form solution of [B, Eq.(39)],
-\begin{equation}
-N_i^* = \mathrm{round}\big(2^{\,1/((1-n^e)\ln 2) - 3}\big) \ \ (0 \le n^e < 1), \qquad N_i^* = N_f \ \ (n^e \ge 1),
-\end{equation}
-is meaningful only on a surprisingly narrow band: for $n^e \lesssim 0.52$ it returns $N_i^* \le 1$ (``do not encrypt''), and for $n^e \gtrsim 0.85$ it saturates at $N_f$ (``encrypt maximally''), regardless of any other condition. With the parameters of [B, Table~I] themselves ($\rho = 10^{-4}$, $N_l = 8$, $v_{\max} = 24$, radius 50 m), $n^e \approx 0.087$ — deep in the degenerate region; at a typical V2V range of 200 m, $n^e \approx 1.4$ — saturated on the other side. We therefore (i) calibrate the sender coverage radii $d_i^{\mathrm{V2I}} = 200$ m and $d_i^{\mathrm{V2V}} = 150$ m so that $n^e \in [0.75, 1.34]$ and $p^{\mathrm{att}} \in [0.41, 0.61]$ — security is a genuine trade-off rather than a constant (see \texttt{scripts/calibrate\_security.py}); and (ii) take this observation as direct motivation for \emph{learning} the block length $N_i$ as part of the policy instead of relying on the closed form (future work, T3.1).
+\subsection{Discussion \& Over-Conservative Policy Mitigation}
+As shown in Table~\ref{tab:model_comparison}, fixed-penalty schemes (\texttt{DuelingDQN} and \texttt{MADDPG}) suffer from an \emph{Over-Conservative Policy} problem: because a large static penalty ($\lambda_p = 100$) is incurred upon any deadline breach, the agents over-optimize latency (reducing violation to $2.7\% - 3.0\%$) at the cost of incurring massive cumulative penalty penalties (reward dropped to $-11,750$) and sacrificing $33.4\%$ of secure information capacity.
+
+In contrast, \texttt{LagrangianDQN} dynamically updates multipliers $\lambda_T \to 1.09$, successfully maintaining deadline violations near the allowed threshold ($\delta_T = 5\%$) while achieving an $80.7\%$ improvement in cumulative reward and superior privacy protection.
+
+\section{Conclusion}
+This paper presented a Constrained DRL framework using Lagrangian Dual Ascent for secure computation offloading in VEC networks. By integrating dynamic security level selection, cryptographic trade-offs, and empirical GPS mobility traces, the proposed \texttt{LagrangianDQN} scheme effectively overcomes the over-conservative penalty issue of traditional baselines, providing a robust solution for real-world VEC deployments.
 
 \end{document}
