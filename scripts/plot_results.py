@@ -35,8 +35,12 @@ def plot_all_results(data_dir: Path, output_dir: Path):
     with open(data_dir / "training_history.json", "r") as f:
         history = json.load(f)
 
-    with open(data_dir / "lambda_history.json", "r") as f:
-        lambdas = json.load(f)
+    lambda_file = data_dir / "lambda_history.json"
+    if lambda_file.exists():
+        with open(lambda_file, "r") as f:
+            lambdas = json.load(f)
+    else:
+        lambdas = None
 
     comp_df = pd.read_csv(data_dir / "reward_components.csv")
 
