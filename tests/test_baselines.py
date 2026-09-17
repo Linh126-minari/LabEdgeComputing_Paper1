@@ -38,7 +38,7 @@ def test_all_local_policy():
     policy = AllLocalPolicy()
     obs, _ = env.reset(seed=42)
     action = policy.select_action(obs, env=env)
-    assert np.array_equal(action, np.array([9, 0, 0]))
+    assert action[0] == env.config.alpha_levels - 1 and len(action) == len(env.action_space.nvec)
 
     obs, reward, term, trunc, info = env.step(action)
     assert "task_cost" in info or "cost" in info
@@ -55,8 +55,10 @@ def test_all_mec_and_aux_policies():
     mec_action = mec_policy.select_action(obs, env=env)
     aux_action = aux_policy.select_action(obs, env=env)
 
-    assert len(mec_action) == 3
-    assert len(aux_action) == 3
+    n = len(env.action_space.nvec)
+    assert len(mec_action) == n and len(aux_action) == n
+    for a in (mec_action, aux_action):
+        assert env.action_mask()[np.ravel_multi_index(a, tuple(env.action_space.nvec))]
 
 
 def test_random_policy_respects_action_mask():
@@ -67,7 +69,7 @@ def test_random_policy_respects_action_mask():
     for _ in range(20):
         action = policy.select_action(obs, env=env)
         mask = env.action_mask()
-        idx = np.ravel_multi_index(action, (10, 2, 10))
+        idx = np.ravel_multi_index(action, tuple(env.action_space.nvec))
         assert mask[idx] == True, "RandomPolicy selected a masked/infeasible action"
         obs, r, term, trunc, info = env.step(action)
         if term or trunc:
@@ -112,7 +114,7 @@ def test_paper_a_alg1_policy():
     policy = PaperAAlgorithm1Policy()
     obs, _ = env.reset(seed=42)
     action = policy.select_action(obs, env=env)
-    assert len(action) == 3
+    assert len(action) == len(env.action_space.nvec)
     assert 0 <= action[0] <= 9
     assert 0 <= action[1] <= 1
 
@@ -122,8 +124,8 @@ def test_cmso_policy_bounds():
     policy = CMSOPolicy()
     obs, _ = env.reset(seed=42)
     action = policy.select_action(obs, env=env)
-    assert len(action) == 3
-    assert 0 <= action[0] <= 9
+    assert len(action) == len(env.action_space.nvec)
+    assert env.action_mask()[np.ravel_multi_index(action, tuple(env.action_space.nvec))]
 
 
 def test_gbd_closed_form_eq39():

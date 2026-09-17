@@ -1,5 +1,7 @@
 # Báo cáo hoàn thành Phase 4 — Dataset & Sim-to-Real Integration
 
+> ⚠️ **16/09/2026:** Dữ liệu dùng trong báo cáo này là sample giả (sinh bởi script), không phải GPS thật. T4.1–T4.3 đã được làm lại — xem `BAO_CAO_PHASE4_RIOBUS.md`.
+
 **Ngày:** 30/07/2026 · Theo `KEHOACH_DUAN_VEC.md` · Tiếp nối `BAO_CAO_PHASE3.md`
 
 ## Quyết định & Nội dung hoàn thành Phase 4

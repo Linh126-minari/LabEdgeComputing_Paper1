@@ -39,12 +39,15 @@ mec_server:
   cpu_frequency: ${mec_cpu_frequency.value}
   base_price: ${mec_base_price.value}
   credibility: ${mec_credibility.value}
+  price_energy_mec: ${price_energy_mec.value}
   bandwidth_pool: ${mec_bandwidth_pool.value}
 
 users:
   count: ${num_users.value}
   velocity_min: ${velocity_min.value}
   velocity_max: ${velocity_max.value}
+  velocity_mean: ${velocity_mean.value}
+  velocity_std: ${velocity_std.value}
   tx_power: ${tx_power.value}
   idle_power: ${idle_power.value}
   task_size_min: ${task_size_min.value}
@@ -62,11 +65,13 @@ aux_vehicles:
   bandwidth_pool: ${aux_bandwidth_pool.value}
 
 mobility:
-  type: "trace"                  # Real GPS trace-backed mobility
-  trace_file: "data/processed/riobus_corridor.csv"
+  type: "trace"                  # GPS thật Rio bus 2019 (BAO_CAO_PHASE4_RIOBUS.md)
+  trace_file: "data/processed/riobus/riobus_train.parquet"   # đánh giá: riobus_test.parquet
+  trace_window_id: null          # null → mỗi episode một cửa sổ (ngày, giờ) ngẫu nhiên
 
 attack:
   count: ${num_attack_vehicles.value}
+  model: "realized"             # đếm attacker thật trong tầm phát (nᵉ thay đổi theo state)
   density: ${attacker_density.value}
   lane_count: ${lane_count.value}
   road_max_speed_mps: ${road_max_speed.value}
@@ -77,10 +82,10 @@ attack:
 
 deadline:
   floor: ${deadline_floor.value}
-  urgency_cap: ${urgency_cap.value}
 
 constraints:
   energy_budget_max: ${energy_budget_max.value}
+  leakage_price: ${leakage_price.value}
   penalty_mode: "fixed"
   deadline_penalty: ${deadline_penalty.value}
   energy_violation_penalty: ${energy_violation_penalty.value}

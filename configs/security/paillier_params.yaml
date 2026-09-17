@@ -1,28 +1,22 @@
 # configs/security/paillier_params.yaml
 #
-# Hệ bảo mật HAI LỚP (T0.3 Phương án 1 — quyết định 26/07/2026):
-#   Lớp 1 — Mã hóa đồng cấu Paillier [A]: bảo vệ nội dung khỏi MEC server tò mò.
-#   Lớp 2 — Mã khối đối xứng lớp liên kết [B]: bảo vệ khỏi eavesdropper trên kênh.
-# Hai tham số key_length (Paillier) và block_length (block cipher) là HAI khái
-# niệm khác nhau, KHÔNG được trộn (lỗi cũ: N_i = 2048 lấy từ khóa Paillier).
-#
+# An ninh PHÂN VAI THEO ĐÍCH (17/09/2026, DANH_GIA_KIEN_TRUC_THEO_BAI_BAO.md §3.1):
+#   MEC (server không tin cậy): Paillier HE [A] — server tính trên ciphertext, chống cả nghe lén → P_leak = 0
+#   AUX (kênh V2V):            mã khối độ dài N_i [B] — P_leak = 1 − (N_i/N_f)^{nᵉ}
 # Giá trị tham chiếu configs/params_master.yaml.
 
 encryption:
   enabled: true
-  security_level: 1.0            # Hệ số mức bảo mật chuẩn hóa [0,1]
-  mode: "simulation"             # "simulation" (công thức) hoặc "emulation" (chạy thật)
+  scheme: "paillier"             # "paillier" (phân vai) | "aes" (cả hai nhánh mã khối, MEC giải mã) | "none"
+  security_level: 1.0
+  mode: "simulation"
 
-  # --- Lớp 1: Mã hóa đồng cấu (Paillier) — theo [A] ---
-  homomorphic:
-    key_length_bits: ${homomorphic_key_length.value}       # source: [A] Section 3.3
-    cycles_per_bit: ${homomorphic_cycles_per_bit.value}    # source: [A] Section 6 (c^en_m)
+  homomorphic:                    # nhánh MEC — [A]
+    key_length_bits: ${homomorphic_key_length.value}
+    cycles_per_bit: ${homomorphic_cycles_per_bit.value}
 
-  # --- Lớp 2: Mã khối đối xứng — theo [B], dùng cho lượng hóa security strength ---
-  block_cipher:
-    frame_length_bits: ${block_cipher_frame_length.value}  # N_f, source: [B] Table I
-    block_length_bits: ${block_cipher_block_length.value}  # N_i, biến quyết định — xem T3.1
-    cycles_per_bit: ${block_cipher_cycles_per_bit.value}   # source: [B] Table I (q^en_i)
-
-  # Tổng chi phí mã hóa hai lớp: 800 + 90 = 890 cycles/bit
-  overhead_cycles_per_bit: ${encryption_total_cycles_per_bit.value}
+  block_cipher:                   # nhánh AUX — [B]
+    frame_length_bits: ${block_cipher_frame_length.value}
+    block_length_bits: ${block_cipher_block_length.value}
+    cycles_per_bit: ${block_cipher_cycles_per_bit.value}
+    round_factor: ${block_cipher_round_factor.value}

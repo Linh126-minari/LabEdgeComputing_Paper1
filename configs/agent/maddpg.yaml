@@ -1,30 +1,35 @@
 # configs/agent/maddpg.yaml
+# MADDPG (Lowe et al., NeurIPS 2017) — src/agents/maddpg.py
+# Mọi user là agent (MultiAgentVehicularEdgeEnv, event-driven); critic tập trung, actor phân tán,
+# Gumbel-Softmax cho action rời rạc, chia sẻ tham số giữa agent. Penalty cố định như DuelingDQN.
 
 name: "MADDPG"
 algo: "MADDPG"
-description: "Multi-Agent Deep Deterministic Policy Gradient for dense scenarios"
+description: "Multi-Agent Deep Deterministic Policy Gradient (Gumbel-Softmax, parameter sharing)"
 
 hyperparameters:
-  learning_rate: 0.001   # Critic/Network LR
+  use_4d_action: true     # action [α_l, đích, β, N_i] (T3.1); false = ablation không chọn N_i
+  learning_rate: 0.001   # không dùng trực tiếp (giữ cho create_env_config / common_kwargs)
   actor_lr: 0.0001
   critic_lr: 0.001
   gamma: 0.95
-  tau: 0.01              # Soft update parameter
+  tau: 0.01              # soft update target actor/critic
   batch_size: 64
   buffer_size: 100000
   learning_starts: 2000
+  hidden_size: 256
+  gumbel_temperature: 1.0
+  train_freq: 1               # cập nhật mạng mỗi N bước; 4 giảm ~3× thời gian train (xem BAO_CAO_HUAN_LUYEN_LAI.md)
 
-  use_double_dqn: true
-  use_soft_update: true
+  reward_mode: "individual"   # "individual" | "max_min" ([B]) | "combined"
+  fairness_xi: 0.5            # chỉ dùng khi reward_mode = "combined"
 
   epsilon_schedule: "linear"
   exploration_fraction: 0.3
   epsilon_start: 1.0
   epsilon_end: 0.01
   epsilon_decay: 0.995
-
-  hidden_size: 256
-  target_update_freq: 100
+  target_update_freq: 100     # không dùng (soft update)
 
   alpha_levels: 10
   action_levels: 10

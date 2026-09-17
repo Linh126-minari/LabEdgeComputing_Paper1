@@ -41,11 +41,11 @@ def test_alpha_constraints_on_random_actions(env):
 
 
 def test_state_dim_formula(env):
-    """T0.10: state dim = 4 + 2(J+N); action 3 chiều."""
+    """State dim = 5 + 2(J+N) (thêm nᵉ); action 4 chiều [α_l, đích, β, N_i]."""
     j = len(env.mec_servers)
     n = len(env.auxiliary_vehicles)
-    assert env.observation_space.shape[0] == 4 + 2 * (j + n)
-    assert len(env.action_space.nvec) == 3
+    assert env.observation_space.shape[0] == 5 + 2 * (j + n)
+    assert len(env.action_space.nvec) == (4 if env.config.use_4d_action else 3)
 
 
 def test_state_in_unit_range(env):

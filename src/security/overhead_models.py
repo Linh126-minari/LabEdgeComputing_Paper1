@@ -70,7 +70,7 @@ class SecurityOverheadModel:
 		c_en = self.compute_cycles_per_bit(block_length_bits)
 		return (c_en * data_size_bits) / (f_u * sec)
 
-	def encryption_energy(self, data_size_bits: float, kappa: float = 1e-27, block_length_bits: float | None = None) -> float:
+	def encryption_energy(self, data_size_bits: float, kappa: float = 1e-28, block_length_bits: float | None = None) -> float:
 		"""E_enc = kappa * c_en(N_i) * s * f_u^2 / sec_level. Ref: [A] Eq(5)."""
 		sec = max(self.config.security_level, 1e-6)
 		f_u = max(self.config.user_cpu_frequency, 1.0)

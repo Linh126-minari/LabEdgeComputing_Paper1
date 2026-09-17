@@ -1,6 +1,6 @@
 import numpy as np
 from dataclasses import dataclass, field
-from src.env.mobility import LinearMobility
+from src.env.mobility import LinearMobility, TraceMobility
 from src.env.channel import ChannelModel
 
 # --- Base Class ---
@@ -41,6 +41,8 @@ class User(ComputingNode):
     def step_mobility(self, dt=1.0):
         """Cập nhật vị trí xe"""
         self.position = self.mobility_model.step(self.position, self.velocity, dt)
+        if isinstance(self.mobility_model, TraceMobility):  # vận tốc thật theo trace (T4.2)
+            self.velocity = self.mobility_model.current_velocity()
 
     def velocity_vector(self) -> np.ndarray:
         """Vector vận tốc theo hướng hiện tại của mobility model (T1.1)."""
@@ -100,6 +102,8 @@ class AuxVehicle(ComputingNode):
 
     def step_mobility(self, dt=1.0):
         self.position = self.mobility_model.step(self.position, self.velocity, dt)
+        if isinstance(self.mobility_model, TraceMobility):  # vận tốc thật theo trace (T4.2)
+            self.velocity = self.mobility_model.current_velocity()
 
     def velocity_vector(self) -> np.ndarray:
         theta = self.mobility_model.current_direction

@@ -26,6 +26,8 @@ import json
 from src.env.core import VehicularEdgeEnvironment, EnvironmentConfig
 from src.agents.policy import DRLAgent
 from src.agents.constrained_policy import LagrangianDRLAgent
+from src.agents.maddpg import MADDPGAgent
+from src.env.multi_agent import MultiAgentVehicularEdgeEnv
 from src.utils.logger import Logger
 
 
@@ -34,133 +36,102 @@ logger = Logger("TrainingScript")
 
 def create_env_config(cfg: DictConfig) -> EnvironmentConfig:
     """
-    Create EnvironmentConfig from Hydra config.
-    
-    Args:
-        cfg: Hydra DictConfig
-    
-    Returns:
-        EnvironmentConfig object
+    EnvironmentConfig từ Hydra config. Giá trị thiếu trong cfg → default của EnvironmentConfig
+    (đã đồng bộ với configs/params_master.yaml bằng tests/test_params_master.py) — không hardcode
+    số lần thứ hai ở đây.
     """
-    # QUY TẮC (T0.1): mọi default ở đây khớp configs/params_master.yaml.
+    D = EnvironmentConfig()
+    env, sec = cfg.env, cfg.get("security", {})
+
+    def g(path: str, field: str):
+        node = env
+        for key in path.split("."):
+            node = node.get(key, None) if node is not None and hasattr(node, "get") else None
+        return getattr(D, field) if node is None else node
+
+    enc = sec.get("encryption", {}) if sec else {}
+    hp = cfg.agent.get("hyperparameters", {})
     return EnvironmentConfig(
-        num_users=cfg.env.get("num_users", 10),
-        num_mec_servers=cfg.env.get("num_mec_servers", 1),
-        num_auxiliary_vehicles=cfg.env.get("num_auxiliary_vehicles", 3),
-        num_attack_vehicles=cfg.env.get("num_attack_vehicles", cfg.env.get("attack", {}).get("count", 2)),
-        sim_area_x=cfg.env.get("sim_area_x", 1000.0),
-        sim_area_y=cfg.env.get("sim_area_y", 1000.0),
-        task_arrival_rate=cfg.env.get("task_arrival_rate", 0.5),
-        # T0.4: task size tính bằng BITS (100-1000 kbit theo [A] §6)
-        task_size_min=cfg.env.get("task_size_min", 102400.0),
-        task_size_max=cfg.env.get("task_size_max", 1024000.0),
-        task_cycles_per_bit=cfg.env.get("task_cycles_per_bit", 1000),
-        task_deadline=cfg.env.get("task_deadline", 1.0),
-        # [A] §6: f_j = 1 GHz, f_n = 0.5 GHz
-        mec_cpu_frequency=cfg.env.get("mec_cpu_frequency", 1e9),
-        aux_cpu_frequency=cfg.env.get("aux_cpu_frequency", 0.5e9),
-        user_cpu_frequency=cfg.env.get("user_cpu_frequency", 2e9),
+        num_users=g("num_users", "num_users"),
+        num_mec_servers=g("num_mec_servers", "num_mec_servers"),
+        num_auxiliary_vehicles=g("num_auxiliary_vehicles", "num_auxiliary_vehicles"),
+        num_attack_vehicles=g("num_attack_vehicles", "num_attack_vehicles"),
+        sim_area_x=g("sim_area_x", "sim_area_x"), sim_area_y=g("sim_area_y", "sim_area_y"),
+        task_arrival_rate=g("task_arrival_rate", "task_arrival_rate"),
+        task_size_min=g("task_size_min", "task_size_min"), task_size_max=g("task_size_max", "task_size_max"),
+        task_cycles_per_bit=g("task_cycles_per_bit", "task_cycles_per_bit"),
+        task_deadline=g("task_deadline", "task_deadline"),
+        mec_cpu_frequency=g("mec_cpu_frequency", "mec_cpu_frequency"),
+        aux_cpu_frequency=g("aux_cpu_frequency", "aux_cpu_frequency"),
+        user_cpu_frequency=g("user_cpu_frequency", "user_cpu_frequency"),
         # Channel (T0.5)
-        bandwidth_mec=cfg.env.get("channel", {}).get("bandwidth_mec", 1.0e6),
-        bandwidth_v2v=cfg.env.get("channel", {}).get("bandwidth_v2v", 0.8e6),
-        noise_power=cfg.env.get("channel", {}).get("noise_power", 3.0e-13),
-        channel_ref_gain=cfg.env.get("channel", {}).get("channel_gain", 4.75e-2),
-        channel_ref_distance=cfg.env.get("channel", {}).get("ref_distance", 1.0),
-        path_loss_exp=cfg.env.get("channel", {}).get("path_loss_exp", 4.0),
-        # Power ([A] §6)
-        user_tx_power=cfg.env.get("users", {}).get("tx_power", 0.2),
-        user_idle_power=cfg.env.get("users", {}).get("idle_power", 0.05),
+        bandwidth_mec=g("channel.bandwidth_mec", "bandwidth_mec"),
+        bandwidth_v2v=g("channel.bandwidth_v2v", "bandwidth_v2v"),
+        noise_power=g("channel.noise_power", "noise_power"),
+        channel_ref_gain=g("channel.channel_gain", "channel_ref_gain"),
+        channel_ref_distance=g("channel.ref_distance", "channel_ref_distance"),
+        path_loss_exp=g("channel.path_loss_exp", "path_loss_exp"),
+        user_tx_power=g("users.tx_power", "user_tx_power"),
+        user_idle_power=g("users.idle_power", "user_idle_power"),
+        velocity_min=g("users.velocity_min", "velocity_min"), velocity_max=g("users.velocity_max", "velocity_max"),
+        velocity_mean=g("users.velocity_mean", "velocity_mean"), velocity_std=g("users.velocity_std", "velocity_std"),
         # Coverage / pools
-        mec_coverage_radius=cfg.env.get("mec_server", {}).get("coverage_radius", 300.0),
-        curb_distance=cfg.env.get("mec_server", {}).get("curb_distance", 20.0),
-        v2v_range=cfg.env.get("v2v_range", 200.0),
-        mec_bandwidth_pool=cfg.env.get("mec_server", {}).get("bandwidth_pool", 1e7),
-        aux_bandwidth_pool=cfg.env.get("aux_vehicles", {}).get("bandwidth_pool", 5e6),
-        # Pricing ([A] §3.5)
-        mec_base_price=cfg.env.get("mec_server", {}).get("base_price", 1.0),
-        aux_base_price=cfg.env.get("aux_vehicles", {}).get("base_price", 0.5),
-        mec_credibility=cfg.env.get("mec_server", {}).get("credibility", 0.9),
-        aux_credibility=cfg.env.get("aux_vehicles", {}).get("credibility", 0.8),
-        # Objective & constraints (T1.2 Phương án 1 + T1.3)
-        varpi_1=cfg.general.get("varpi_1", 1e-5),  # [B] Table I (T0.8)
-        energy_budget_max=cfg.env.get("constraints", {}).get("energy_budget_max", 0.4),
+        mec_coverage_radius=g("mec_server.coverage_radius", "mec_coverage_radius"),
+        curb_distance=g("mec_server.curb_distance", "curb_distance"),
+        v2v_range=g("v2v_range", "v2v_range"),
+        mec_bandwidth_pool=g("mec_server.bandwidth_pool", "mec_bandwidth_pool"),
+        aux_bandwidth_pool=g("aux_vehicles.bandwidth_pool", "aux_bandwidth_pool"),
+        # Pricing ([A] §3.5, Eq(22))
+        mec_base_price=g("mec_server.base_price", "mec_base_price"),
+        aux_base_price=g("aux_vehicles.base_price", "aux_base_price"),
+        mec_credibility=g("mec_server.credibility", "mec_credibility"),
+        aux_credibility=g("aux_vehicles.credibility", "aux_credibility"),
+        price_energy_local=g("users.price_energy_local", "price_energy_local"),
+        price_energy_mec=g("mec_server.price_energy_mec", "price_energy_mec"),
+        price_energy_av=g("aux_vehicles.price_energy_av", "price_energy_av"),
+        # Objective & constraints
+        leakage_price=g("constraints.leakage_price", "leakage_price"),
+        energy_budget_max=g("constraints.energy_budget_max", "energy_budget_max"),
         penalty_mode=("external" if cfg.agent.get("name", "") == "LagrangianDQN"
-                      else cfg.env.get("constraints", {}).get("penalty_mode", "fixed")),
-        deadline_penalty=cfg.env.get("constraints", {}).get("deadline_penalty", 5.0),
-        energy_violation_penalty=cfg.env.get("constraints", {}).get("energy_violation_penalty", 5.0),
-        # Deadline động (T1.1)
-        deadline_floor=cfg.env.get("deadline", {}).get("floor", 0.05),
-        urgency_cap=cfg.env.get("deadline", {}).get("urgency_cap", 3.0),
-        # Security — hệ hai lớp (T0.3)
-        encryption_enabled=cfg.security.get("encryption", {}).get("enabled", True),
-        encryption_mode=cfg.security.get("encryption", {}).get("mode", "simulation"),
-        encryption_overhead_cycles_per_bit=cfg.security.get("encryption", {}).get("overhead_cycles_per_bit", 890.0),
-        security_level=cfg.security.get("encryption", {}).get("security_level", 1.0),
-        # Attacker model [B] Eq(5)-(9) (T0.2, T0.3)
-        attacker_density=cfg.env.get("attack", {}).get("density", 1e-4),
-        frame_length_bits=cfg.env.get("attack", {}).get("frame_length_bits", 64.0),
-        encryption_block_length_bits=cfg.env.get("attack", {}).get("encryption_block_length_bits", 32.0),
-        lane_count=cfg.env.get("attack", {}).get("lane_count", 8.0),
-        road_max_speed_mps=cfg.env.get("attack", {}).get("road_max_speed_mps", 25.0),
-        security_range_v2i=cfg.env.get("attack", {}).get("security_range_v2i", 200.0),
-        security_range_v2v=cfg.env.get("attack", {}).get("security_range_v2v", 150.0),
+                      else g("constraints.penalty_mode", "penalty_mode")),
+        deadline_penalty=g("constraints.deadline_penalty", "deadline_penalty"),
+        energy_violation_penalty=g("constraints.energy_violation_penalty", "energy_violation_penalty"),
+        deadline_floor=g("deadline.floor", "deadline_floor"),
+        # Security — phân vai theo đích
+        encryption_enabled=enc.get("enabled", D.encryption_enabled),
+        encryption_mode=enc.get("mode", D.encryption_mode),
+        he_cycles_per_bit=enc.get("homomorphic", {}).get("cycles_per_bit", D.he_cycles_per_bit),
+        block_cipher_cycles_per_bit=enc.get("block_cipher", {}).get("cycles_per_bit", D.block_cipher_cycles_per_bit),
+        block_cipher_round_factor=enc.get("block_cipher", {}).get("round_factor", D.block_cipher_round_factor),
+        security_level=enc.get("security_level", D.security_level),
+        crypto_scheme=enc.get("scheme", D.crypto_scheme),
+        attacker_model=g("attack.model", "attacker_model"),
+        attacker_density=g("attack.density", "attacker_density"),
+        frame_length_bits=g("attack.frame_length_bits", "frame_length_bits"),
+        encryption_block_length_bits=g("attack.encryption_block_length_bits", "encryption_block_length_bits"),
+        lane_count=g("attack.lane_count", "lane_count"),
+        road_max_speed_mps=g("attack.road_max_speed_mps", "road_max_speed_mps"),
+        security_range_v2i=g("attack.security_range_v2i", "security_range_v2i"),
+        security_range_v2v=g("attack.security_range_v2v", "security_range_v2v"),
+        use_4d_action=hp.get("use_4d_action", D.use_4d_action),
+        # Mobility (Phase 4)
+        mobility_type=g("mobility.type", "mobility_type"),
+        trace_file=g("mobility.trace_file", "trace_file"),
+        trace_window_id=g("mobility.trace_window_id", "trace_window_id"),
         # Background users (T1.5)
-        background_users_enabled=cfg.env.get("background", {}).get("users_enabled", True),
-        background_alpha_l=cfg.env.get("background", {}).get("alpha_l", 0.5),
-        background_resource_level=cfg.env.get("background", {}).get("resource_level", 4),
-        background_load_enabled=cfg.env.get("background", {}).get("load_enabled", False),
-        alpha_levels=cfg.agent.get("hyperparameters", {}).get(
-            "alpha_levels",
-            cfg.agent.get("hyperparameters", {}).get("action_levels", 10),
-        ),
-        action_levels=cfg.agent.get("hyperparameters", {}).get("action_levels", 10),
-        dt=cfg.env.get("dt", 0.1),
-        episode_length=cfg.env.get("episode_length", 1000)
+        background_users_enabled=g("background.users_enabled", "background_users_enabled"),
+        background_alpha_l=g("background.alpha_l", "background_alpha_l"),
+        background_resource_level=g("background.resource_level", "background_resource_level"),
+        background_load_enabled=g("background.load_enabled", "background_load_enabled"),
+        alpha_levels=hp.get("alpha_levels", hp.get("action_levels", D.alpha_levels)),
+        action_levels=hp.get("action_levels", D.action_levels),
+        dt=g("dt", "dt"),
+        episode_length=g("episode_length", "episode_length"),
     )
 
 
-def train(cfg: DictConfig):
-    """
-    Main training function.
-    
-    Args:
-        cfg: Hydra DictConfig with configuration
-    """
-    logger.info("=" * 80)
-    logger.info("Starting training for Vehicular Edge Computing DRL Agent")
-    logger.info("=" * 80)
-    logger.info(f"Config:\n{OmegaConf.to_yaml(cfg)}")
-    
-    # ==================== Setup ====================
-    output_dir = Path(cfg.paths.logs) / cfg.general.project_name
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Set random seed
-    np.random.seed(cfg.general.random_seed)
-    
-    # ==================== Create Environment ====================
-    logger.info("Creating environment...")
-    env_config = create_env_config(cfg)
-    env = VehicularEdgeEnvironment(env_config)
-
-    # T0.10: assert nhất quán state/action dim với công thức trong bài
-    J = env_config.num_mec_servers
-    N = env_config.num_auxiliary_vehicles
-    expected_state_dim = 4 + 2 * (J + N)
-    assert env.observation_space.shape[0] == expected_state_dim, (
-        f"State dim không khớp công thức trong bài: "
-        f"{env.observation_space.shape[0]} != 4 + 2({J}+{N}) = {expected_state_dim}"
-    )
-    assert len(env.action_space.nvec) == 3, (
-        f"Action phải có 3 chiều [alpha_l_level, target, resource_level], "
-        f"nhận được {len(env.action_space.nvec)}"
-    )
-    logger.info(f"Environment created: state_dim={env.observation_space.shape[0]} "
-                f"(formula: 4 + 2(J+N) = 4 + 2({J}+{N})), "
-                f"action_dim=3 (MultiDiscrete {env.action_space.nvec.tolist()})")
-    
-    # ==================== Create Agent ====================
-    logger.info("Creating DRL agent...")
+def build_agent(cfg: DictConfig, env: VehicularEdgeEnvironment, env_config: EnvironmentConfig):
+    """Tạo agent theo cfg.agent.name. Trả (agent, train_env) — MADDPG dùng env đa agent."""
     hp = cfg.agent.hyperparameters
     num_episodes_cfg = cfg.general.get("num_episodes", 100)
     common_kwargs = dict(
@@ -185,7 +156,25 @@ def train(cfg: DictConfig):
         base_dt=env_config.dt,  # T1.4: semi-MDP discount
         device=cfg.general.device if (cfg.general.device != "cuda" or __import__("torch").cuda.is_available()) else "cpu",
     )
-    if cfg.agent.get("name", "") == "LagrangianDQN":
+    train_env = env  # env agent tương tác; metrics luôn đọc từ metrics_env
+    if cfg.agent.get("name", "") == "MADDPG":
+        # MADDPG thật (src/agents/maddpg.py): mọi user là agent trong env đa agent,
+        # huấn luyện tập trung / thực thi phân tán. Không còn background user Algorithm 1.
+        train_env = MultiAgentVehicularEdgeEnv(env_config, reward_mode=hp.get("reward_mode", "individual"),
+                                               xi=hp.get("fairness_xi", 0.5))
+        agent = MADDPGAgent(
+            obs_dim=env.observation_space.shape[0], action_dim=env.action_space.nvec,
+            n_agents=train_env.num_users,
+            actor_lr=hp.get("actor_lr", 1e-4), critic_lr=hp.get("critic_lr", 1e-3),
+            gamma=hp.gamma, tau=hp.get("tau", 0.01), batch_size=hp.batch_size, buffer_size=hp.buffer_size,
+            learning_starts=hp.get("learning_starts", 2000), hidden_size=hp.get("hidden_size", 256),
+            gumbel_temperature=hp.get("gumbel_temperature", 1.0),
+            epsilon_start=hp.epsilon_start, epsilon_end=hp.epsilon_end,
+            exploration_fraction=hp.get("exploration_fraction", 0.3),
+            total_training_steps=num_episodes_cfg * env_config.episode_length,
+            base_dt=env_config.dt, device=common_kwargs["device"], train_freq=hp.get("train_freq", 1),
+        )
+    elif cfg.agent.get("name", "") == "LagrangianDQN":
         # T1.3: env đã ở penalty_mode="external" (đặt trong create_env_config)
         agent = LagrangianDRLAgent(
             **common_kwargs,
@@ -199,6 +188,54 @@ def train(cfg: DictConfig):
         )
     else:
         agent = DRLAgent(**common_kwargs)
+    return agent, train_env
+
+
+def train(cfg: DictConfig):
+    """
+    Main training function.
+    
+    Args:
+        cfg: Hydra DictConfig with configuration
+    """
+    logger.info("=" * 80)
+    logger.info("Starting training for Vehicular Edge Computing DRL Agent")
+    logger.info("=" * 80)
+    logger.info(f"Config:\n{OmegaConf.to_yaml(cfg)}")
+    
+    # ==================== Setup ====================
+    output_dir = Path(cfg.paths.logs) / cfg.general.project_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Set random seed (numpy + torch để các seed tái lập được)
+    np.random.seed(cfg.general.random_seed)
+    __import__("torch").manual_seed(cfg.general.random_seed)
+    
+    # ==================== Create Environment ====================
+    logger.info("Creating environment...")
+    env_config = create_env_config(cfg)
+    env = VehicularEdgeEnvironment(env_config)
+
+    # T0.10: assert nhất quán state/action dim với công thức trong bài
+    J = env_config.num_mec_servers
+    N = env_config.num_auxiliary_vehicles
+    expected_state_dim = 5 + 2 * (J + N)
+    assert env.observation_space.shape[0] == expected_state_dim, (
+        f"State dim không khớp công thức trong bài: "
+        f"{env.observation_space.shape[0]} != 5 + 2({J}+{N}) = {expected_state_dim}"
+    )
+    expected_action_dims = 4 if env_config.use_4d_action else 3
+    assert len(env.action_space.nvec) == expected_action_dims, (
+        f"Action phải có {expected_action_dims} chiều [α_l, target, β(, N_i)], "
+        f"nhận được {len(env.action_space.nvec)}"
+    )
+    logger.info(f"Environment created: state_dim={env.observation_space.shape[0]} "
+                f"(formula: 5 + 2(J+N) = 5 + 2({J}+{N})), "
+                f"action=MultiDiscrete {env.action_space.nvec.tolist()}")
+
+    # ==================== Create Agent ====================
+    logger.info("Creating DRL agent...")
+    agent, train_env = build_agent(cfg, env, env_config)
     logger.info("DRL agent created successfully")
     
     # ==================== Training Loop ====================
@@ -214,16 +251,20 @@ def train(cfg: DictConfig):
 
     for episode in range(1, num_episodes + 1):
         # Train episode
-        stats = agent.train_episode(env, max_steps=env_config.episode_length)
+        stats = agent.train_episode(train_env, max_steps=env_config.episode_length)
         training_history.append(stats)
 
         # T1.2: thành phần reward trung bình của episode (từ env metrics)
-        ep_metrics = env.get_metrics()
+        metrics_env = train_env.env if isinstance(train_env, MultiAgentVehicularEdgeEnv) else train_env
+        ep_metrics = metrics_env.get_metrics()
         component_history.append({
             "episode": episode,
             "avg_cost_energy": ep_metrics.get("avg_cost_energy", 0.0),
             "avg_cost_service": ep_metrics.get("avg_cost_service", 0.0),
+            "avg_cost_security": ep_metrics.get("avg_cost_security", 0.0),
             "avg_secure_capacity": ep_metrics.get("avg_secure_capacity", 0.0),
+            "avg_block_length_aux": ep_metrics.get("avg_block_length_aux", 0.0),
+            "offload_ratio": ep_metrics.get("offload_ratio", 0.0),
             "deadline_violation_rate": ep_metrics.get("deadline_violation_rate", 0.0),
             "energy_violation_rate": ep_metrics.get("energy_violation_rate", 0.0),
             "link_loss_failure_rate": ep_metrics.get("link_loss_failure_rate", 0.0),
@@ -246,8 +287,8 @@ def train(cfg: DictConfig):
             eval_delays = []
             eval_violations = []
             
-            for _ in range(5):  # Evaluate for 5 episodes
-                eval_stats = agent.evaluate_episode(env, max_steps=env_config.episode_length)
+            for _ in range(cfg.general.get("eval_episodes", 5)):
+                eval_stats = agent.evaluate_episode(train_env, max_steps=env_config.episode_length)
                 eval_rewards.append(eval_stats.get("episode_reward", 0.0))
                 eval_delays.append(eval_stats.get("avg_delay", 0.0))
                 eval_violations.append(eval_stats.get("deadline_violation_rate", 0.0))

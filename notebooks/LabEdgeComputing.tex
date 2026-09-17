@@ -22,6 +22,7 @@
 Secure and low-latency computation offloading is critical for delay-sensitive vehicular applications in Vehicular Edge Computing (VEC) networks. Existing offloading schemes often suffer from over-conservative policies when handling hard delay and energy constraints via hand-tuned fixed penalties. In this paper, we propose a Constrained Deep Reinforcement Learning (DRL) framework using Dueling Double DQN with Lagrangian Dual Ascent (\texttt{LagrangianDQN}) to jointly optimize task partitioning, server selection, resource allocation, and dynamic security levels. We unify two cryptographic paradigms—Paillier Homomorphic Encryption for cloud privacy and link-layer block ciphers for physical eavesdropping protection. Furthermore, we integrate real-world Rio de Janeiro bus GPS trajectories to evaluate the Sim-to-Real transfer gap. Experimental results over 500 training episodes demonstrate that our proposed \texttt{LagrangianDQN} scheme outperforms standard fixed-penalty baselines (\texttt{DuelingDQN} and \texttt{MADDPG}) by achieving an $80.7\%$ higher total reward ($-2,264.15$ vs. $-11,757.16$), increasing secure information capacity by $33.4\%$ ($7,922.61$ bps vs. $5,938.74$ bps), while strictly bounding deadline violations near the target threshold ($6.24\%$ vs. $\delta_T = 5\%$).
 \end{abstract}
 
+% CẢNH BÁO (17/09/2026): số liệu trong Abstract/Results thuộc mô hình cũ — cập nhật sau khi train lại (HUONG_DAN_COLAB.md).
 \section{Introduction}
 Vehicular Edge Computing (VEC) enables resource-constrained vehicular user devices to offload computation-heavy tasks to nearby Roadside Units (RSUs) or Auxiliary Vehicles (AVs). However, VEC environments face multi-dimensional challenges: high mobility, dynamic channel conditions, limited edge resources, and security vulnerabilities against passive eavesdroppers and malicious entities.
 
@@ -86,61 +87,71 @@ We formulate the secure task offloading and resource allocation problem as an \e
 \end{equation}
 
 \subsection{State Space ($\mathcal{S}$)}
-At each time step, the normalized state vector $s_t \in \mathcal{S}$ ($12$-dimensional for $J=1, N=3$) consists of:
+At each decision epoch, the normalized state vector $s_t \in \mathcal{S}$ ($5+2(J+N)=13$ dimensions for $J=1, N=3$) is:
 \begin{equation}
-s_t = [s_t^{{\rm task}}, s_t^{{\rm dist}}, s_t^{{\rm resource}}, s_t^{{\rm channel}}]^T,
+s_t = [\bar{s}_t,\ \bar{\tau}_t,\ \omega_t,\ \bar{d}_{u,j},\ \bar{d}_{u,n},\ \bar{U}_j,\ \bar{U}_n,\ \bar{R}_{u,j},\ \bar{n}^e_u]^T,
 \end{equation}
-including task size $\bar{s}_t$, dynamic deadline $\bar{\tau}_t$, task urgency $\omega_t$, normalized distances $d_{u,j}, d_{u,n}$, node CPU utilizations $U_j, U_n$, and uplink rate $\bar{R}_{u,j}$.
+i.e., task size, effective deadline, urgency $\omega_t = 1/(1+\tau_u(t)) \in (0,1)$, normalized distances, node CPU utilizations, uplink rate, and the number of attackers $n^e_u$ within the sender's V2V transmission range (known to the sender, as assumed in [B] when choosing the block length).
 
 \subsection{Action Space ($\mathcal{A}$) \& Feasibility Masking}
-The agent selects a non-redundant multi-discrete action:
+The agent selects a multi-discrete action
 \begin{equation}
-a_t = [l_u^{(\alpha_l)}, d_u, l_u^{(r)}]^T \in \{0,\dots,9\} \times \{0,1\} \times \{0,\dots,9\},
+a_t = [l^{(\alpha_l)}_u,\ d_u,\ l^{(\beta)}_u,\ k_u]^T \in \{0,\dots,9\} \times \{0,1\} \times \{0,\dots,9\} \times \{0,\dots,3\},
 \end{equation}
-giving $|\mathcal{A}| = 200$ discrete actions. To prevent invalid exploration out of wireless range, a feasibility mask sets $Q(s,a) = -\infty$ for out-of-coverage branches.
+where $d_u$ selects the MEC server or an auxiliary vehicle, $l^{(\beta)}_u$ the resource share, and $k_u$ the block length $N_u \in \{8,16,32,64\}$ bits ($|\mathcal{A}|=800$). A feasibility mask sets $Q(s,a)=-\infty$ for out-of-coverage or busy targets, and fixes $k_u$ whenever the block cipher is not used (local and MEC branches), removing redundant actions. The local and encryption CPU frequencies are not learned: given the action, they follow the energy-optimal DVFS rule below, so the controller is a hybrid of DRL (discrete decisions) and closed-form convex optimization (continuous frequencies), in the spirit of DDRP+CMSO in [A] and GBD in [B].
+
+\subsection{Computation, DVFS and Energy}
+Encryption of the offloaded part and local computation run sequentially on the vehicle CPU, whose frequency is bounded by $F^{\mathrm{loc}}$ ([B] C4). With $C_{\mathrm{en}}$ and $C_l$ the respective CPU cycles and $T_r$ the upload-plus-remote-execution time, the frequencies solve
+\begin{equation}
+\min_{f_{\mathrm{en}}, f_l \le F^{\mathrm{loc}}} \kappa\big(C_{\mathrm{en}} f_{\mathrm{en}}^2 + C_l f_l^2\big)
+\ \ \text{s.t.}\ \ \frac{C_{\mathrm{en}}}{f_{\mathrm{en}}} + \frac{C_l}{f_l} \le \tau_u,\ \ \frac{C_{\mathrm{en}}}{f_{\mathrm{en}}} + T_r \le \tau_u,
+\end{equation}
+whose KKT solution is $f_{\mathrm{en}} = f_l = (C_{\mathrm{en}}+C_l)/\tau_u$ when the second constraint is inactive, and $f_{\mathrm{en}} = C_{\mathrm{en}}/(\tau_u - T_r)$, $f_l = C_l/(\tau_u - C_{\mathrm{en}}/f_{\mathrm{en}})$ otherwise (consistent with the optimal local frequency $f^* = \alpha_l s c/\tau$ in [A] Eq.~(34)). The task delay is $T_u = C_{\mathrm{en}}/f_{\mathrm{en}} + \max(C_l/f_l,\ T_r)$.
 
 \subsection{Objective Function and Lagrangian Formulation}
-The optimization problem minimizes monetary cost and maximizes secure capacity subject to hard constraints:
+The per-task monetary cost extends [A] Eq.~(22) with a leakage-risk term:
 \begin{equation}
-\min_{\mathbf{\theta}} \ \mathbb{E}\Big[\sum_t \big(C_u(t) - \varpi_1 U_u(t)\big)\Big]
-\quad \text{s.t.} \quad \mathbb{P}\{T_u(t) > \tau_u(t)\} \le \delta_T, \quad \mathbb{E}[E_u(t)] \le E_{\max},
+C_u = \lambda^l E^{\mathrm{loc}}_u + \lambda^{b} E^{b}_u + g_b\,\alpha_b s_u c_u + \varpi_s\,\alpha_b s_u\,\big(1 - S^{b}_u\big),
+\label{eq:total_cost}
+\end{equation}
+where $b \in \{j, n\}$ is the selected remote branch, $E^b_u$ is the \emph{user's} encryption, transmission and waiting energy for that branch priced at $\lambda^j$ or $\lambda^n$ ([A] Eq.~(20),(22)), $g_b$ is the dynamic unit price of [A] \S3.5, and $\varpi_s$ (cents/bit) prices the expected number of offloaded bits exposed to eavesdroppers. Local processing and homomorphically encrypted MEC offloading have $1-S=0$, so no execution mode is rewarded merely for transmitting data. The problem is
+\begin{equation}
+\min_{\mathbf{\theta}} \ \mathbb{E}\Big[\sum_t C_u(t)\Big]
+\quad \text{s.t.} \quad \mathbb{P}\{T_u(t) > \tau_u(t)\} \le \delta_T, \quad \mathbb{E}[(E_u(t)-E_{\max})^+] \le \delta_E,
 \label{eq:objective}
 \end{equation}
-where $C_u(t)$ is monetary cost in cents, $U_u(t)$ is secure capacity ($\varpi_1 = 10^{-5}$), $\delta_T = 0.05$ ($5\%$ allowed violation), and $E_{\max} = 0.4$ J.
-
-Using Lagrangian relaxation, the dual objective is:
+with $\delta_T = 0.05$ and $E_{\max} = 0.4$ J ([B] C3). Using Lagrangian relaxation, the dual objective is:
 \begin{equation}
-L(\theta, \lambda_T, \lambda_E) = \mathbb{E}\Big[\sum_t r_t\Big] - \lambda_T\big(\mathbb{E}[\mathbb{I}\{T_u > \tau_u\}] - \delta_T\big) - \lambda_E\big(\mathbb{E}[(E_u - E_{\max})^+] - \delta_E\big).
+L(\theta, \lambda_T, \lambda_E) = \mathbb{E}\Big[\sum_t r_t\Big] - \lambda_T\big(\mathbb{E}[\mathbb{I}\{T_u > \tau_u\}] - \delta_T\big) - \lambda_E\big(\mathbb{E}[(E_u - E_{\max})^+] - \delta_E\big),
 \label{eq:lagrangian}
 \end{equation}
-The dual multipliers are updated via dual ascent every $K=10$ episodes:
+with $r_t = -C_u(t)$. The dual multipliers are updated via dual ascent every $K=10$ episodes:
 \begin{equation}
 \lambda \leftarrow \max\big(0, \lambda + \eta_\lambda (\hat{v} - \delta)\big).
 \end{equation}
 
-\section{Privacy Protection and Cryptographic Trade-Off}
+\section{Role-Based Privacy Protection}
 \label{sec:privacy_model}
 
-We incorporate a unified two-layer privacy protection model:
+The two threat models of [A] and [B] are assigned to the offloading target that exposes them:
 \begin{enumerate}
-    \item \textbf{Cloud Layer (Paillier Homomorphic Encryption):} Protects data content at honest-but-curious MEC servers ($1024$-bit key length, $800$ cycles/bit, $2.0\times$ ciphertext expansion).
-    \item \textbf{Link Layer (Symmetric Block Cipher - AES):} Protects wireless transmission against passive eavesdroppers ($90$ cycles/bit, block length $N_u \le N_f = 64$ bits).
+    \item \textbf{MEC offloading (Paillier homomorphic encryption, [A]):} the honest-but-curious server computes directly on ciphertext, which also protects the uplink against eavesdroppers ([A] \S3.3). Cost: $c^{\mathrm{en}} = 800$ cycles/bit at the vehicle and $2\times$ ciphertext expansion on the uplink; leakage probability $0$.
+    \item \textbf{Auxiliary-vehicle offloading (block cipher, [B]):} the V2V link is exposed to eavesdropping vehicles. Cost: $q^{\mathrm{en}}(N_u) = 90\,(1+\kappa_N\log_2(N_u/8))$ cycles/bit, where the factor $\kappa_N$ models the growth of cipher rounds with key length (extension; [B] uses a constant $q^{\mathrm{en}}$). Security strength ([B] Eq.~(7)):
 \end{enumerate}
-
-The effective security strength $S_{u,\nu}$ and attack success probability $p_{u,\nu}^{\mathrm{att}}$ under attacker density $\rho = 10^{-4}$ are:
 \begin{equation}
-S_{u,\nu} = \left(\frac{N_u}{N_f}\right)^{n_u^e}, \qquad p_{u,\nu}^{\mathrm{att}} = 1 - S_{u,\nu},
+S^{n}_u = \left(\frac{N_u}{N_f}\right)^{n_u^e},
 \end{equation}
-where $n_u^e = \pi d_u^2 \rho \gamma$ is the expected number of eavesdroppers in range. The secure information capacity is:
-\begin{equation}
-U_{u,\nu} = \frac{R_{u,\nu}}{8N_u}\log_2(8N_u)\,S_{u,\nu}.
-\label{eq:secure_capacity}
-\end{equation}
+where $n_u^e$ is the number of attackers within the sender's range $d_u$. The simulator places physical attackers with density calibrated so that $\mathbb{E}[n^e_u] = \pi d_u^2 \rho\, N_l/(3v_{\max})$ ([B] Eq.~(8)); $n^e_u$ therefore varies across decisions and the optimal block length is state-dependent. The block length thus trades encryption time and energy against leakage risk. For reference we also report the secure information capacity of [B] Eq.~(9), $U_u = \frac{R_u}{8N_u}\log_2(8N_u)\,S_u$, which is not part of the objective.
 
 \section{Empirical Mobility \& Sim-to-Real Integration}
-To bridge the simulation-to-reality gap, we integrate a real-world GPS trajectory dataset of Rio de Janeiro municipal buses (\texttt{Rio bus dataset}). Trajectories were resampled at $dt = 0.1$ s, velocity converted to m/s ($0 \le v \le 35$), and normalized to simulation bounds ($1000\text{ m} \times 1000\text{ m}$).
+\label{sec:riobus}
+To bridge the simulation-to-reality gap, we use real GPS traces of Rio de Janeiro municipal buses (25 Jan--21 Mar 2019; 9.56\,M fixes, 77 lines, 2{,}162 buses; median sampling interval 60\,s). Timestamps are rebuilt from the recorded date, duplicates and GPS jumps ($>120$\,km/h) are removed, Carnival days (2--6 Mar) are excluded, and trips are split at gaps $>180$\,s, leaving 6.94\,M fixes. We select the $1\,\text{km}^2$ grid cell with the most distinct (bus, hour) pairs during weekday peak hours (Pra\c{c}a da Bandeira, lat $-22.913$, lon $-43.208$) and co-locate MEC server \#0 with its centre; coordinates are projected to a local metric frame.
 
-A \texttt{TraceMobility} model feeds actual trajectory sequences to users, auxiliary helpers, and attackers. A Kolmogorov-Smirnov test confirmed significant distribution divergence ($KS = 0.9882, p < 10^{-5}$) compared to synthetic uniform mobility ($15-25$ m/s), highlighting the necessity of trace-backed validation.
+Each episode samples a 30-minute window (weekdays, hourly starts 06:00--20:00), longer than one 1{,}000-decision episode. All buses observed in the window share one clock, so V2I/V2V distances are real. Because buses traverse the coverage area (median residence 86\,s) rather than remain in it, every simulated entity is a \emph{slot}: interval scheduling assigns successive real trajectory segments (linearly interpolated at 1\,s, clipped to 1.5\,km) to 15 slots; slots without a real bus (15\% of slot-time) are marked inactive and masked out of offloading decisions. Attacker vehicles remain synthetic in this scenario because the traces contain buses only. Windows are split by date into training (25 Jan--28 Feb, 108 windows) and test sets (7--21 Mar, 35 windows).
+
+Real traces differ markedly from the synthetic model (truncated Gaussian velocities of [B]): mean speed 4.4 vs.\ 13\,m/s (KS $=0.728$) and median MEC residence time 86 vs.\ 31\,s (KS $=0.553$), both $p<10^{-10}$.
+% TODO(16/09/2026): kết quả transfer matrix 2x2 (scripts/sim2real_study.py) chưa chạy đầy đủ.
+% LƯU Ý: dữ liệu chỉ gồm xe buýt, nội suy tuyến tính chưa map-matching — ghi vào Limitations.
 
 \section{Key Notations and Simulation Setup}
 \label{sec:notations}
@@ -181,10 +192,17 @@ $\delta_T, \delta_E$ & Target constraint violation thresholds ($\delta_T = 0.05,
 \label{sec:numerical_results}
 
 We evaluate the performance of the proposed \texttt{LagrangianDQN} agent against two baseline models trained for 500 episodes:
+% CẢNH BÁO (16/09/2026) — kết quả mục này KHÔNG hợp lệ, phải chạy lại (xem BAO_CAO_HUAN_LUYEN_LAI.md):
+%  (1) "MADDPG" cũ không có cài đặt riêng (thực chất là Dueling Double DQN). ĐÃ SỬA: src/agents/maddpg.py.
+%  (2) Reward không cùng thước đo: LagrangianDQN log reward KHÔNG trừ penalty, baseline log reward ĐÃ trừ
+%      penalty (λ_p = 5, không phải 100) → "-2264 vs -11757, +80.7%" sai. Dùng objective chung (sim2real_study.py).
+%  (3) viol_E ≈ 100% (E ≈ 2.3 J > E_max 0.4 J). ĐÃ SỬA: DVFS ([B] C4) + κ = 1e-28 (scripts/calibrate_energy.py).
+%  (4) Cả 3 mô hình train với mobility synthetic, chưa dùng dữ liệu Rio.
+%  (5) N_i chưa bao giờ nằm trong action space (cờ use_4d_action không được dùng) → "dynamic security levels" chưa được học.
 \begin{itemize}
     \item \textbf{\texttt{LagrangianDQN}:} Dueling Double DQN with Lagrangian Dual Ascent (Proposed).
     \item \textbf{\texttt{DuelingDQN}:} Dueling Double DQN with fixed penalty ($\lambda_p = 100$) [A].
-    \item \textbf{\texttt{MADDPG}:} Multi-Agent Deep Deterministic Policy Gradient with fixed penalty.
+    \item \textbf{\texttt{MADDPG}:} Multi-Agent Deep Deterministic Policy Gradient (Lowe et al., NeurIPS 2017): every user vehicle is an agent with a decentralized actor and a centralized critic, Gumbel-Softmax relaxation for the discrete action heads, parameter sharing, and the same fixed penalty as \texttt{DuelingDQN}.
 \end{itemize}
 
 \subsection{Performance Summary}

@@ -55,9 +55,9 @@ CODE_MAPPING = {
     "security_range_v2i": "security_range_v2i",
     "security_range_v2v": "security_range_v2v",
     "deadline_floor": "deadline_floor",
-    "urgency_cap": "urgency_cap",
     "energy_budget_max": "energy_budget_max",
     "price_energy_local": "price_energy_local",
+    "price_energy_mec": "price_energy_mec",
     "price_energy_av": "price_energy_av",
     "mec_bandwidth_pool": "mec_bandwidth_pool",
     "aux_bandwidth_pool": "aux_bandwidth_pool",
@@ -67,13 +67,19 @@ CODE_MAPPING = {
     "aux_credibility": "aux_credibility",
     "cost_normalization_divisor": "cost_normalization_divisor",
     "resource_multiplier_step": "resource_multiplier_step",
-    "encryption_total_cycles_per_bit": "encryption_overhead_cycles_per_bit",
+    "homomorphic_cycles_per_bit": "he_cycles_per_bit",
+    "block_cipher_cycles_per_bit": "block_cipher_cycles_per_bit",
+    "block_cipher_round_factor": "block_cipher_round_factor",
+    "velocity_min": "velocity_min",
+    "velocity_max": "velocity_max",
+    "velocity_mean": "velocity_mean",
+    "velocity_std": "velocity_std",
     "attacker_density": "attacker_density",
     "block_cipher_frame_length": "frame_length_bits",
     "block_cipher_block_length": "encryption_block_length_bits",
     "lane_count": "lane_count",
     "road_max_speed": "road_max_speed_mps",
-    "varpi_1": "varpi_1",
+    "leakage_price": "leakage_price",
     "deadline_penalty": "deadline_penalty",
     "energy_violation_penalty": "energy_violation_penalty",
     "dt": "dt",
@@ -211,12 +217,9 @@ def test_code_defaults_match_params_master(params):
     assert not mismatches, "Lệch giữa params_master và code:\n  " + "\n  ".join(mismatches)
 
 
-def test_two_layer_encryption_cycles_add_up(params):
-    """Hệ hai lớp (T0.3): c_en tổng = Paillier [A] + block cipher [B]."""
-    total = params["encryption_total_cycles_per_bit"]["value"]
-    he = params["homomorphic_cycles_per_bit"]["value"]
-    bc = params["block_cipher_cycles_per_bit"]["value"]
-    assert total == he + bc, f"{total} != {he} + {bc}"
+def test_role_based_encryption_costs(params):
+    """Phân vai theo đích: Paillier (MEC) đắt hơn mã khối (AUX) — [A] 800 vs [B] 90 cycles/bit."""
+    assert params["homomorphic_cycles_per_bit"]["value"] > params["block_cipher_cycles_per_bit"]["value"]
 
 
 def test_block_length_within_frame_length(params):

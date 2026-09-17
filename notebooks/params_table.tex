@@ -13,19 +13,21 @@
     $U$ & 10 & vehicles & [A] Fig.3 \\
     $J$ & 1 & servers & [A] Fig.3 \\
     $N$ & 3 & vehicles & [A] Fig.3 \\
-    $v_{\min}$ & 15 & m/s & [A] Section 6 \\
-    $v_{\max}$ & 25 & m/s & [A] Section 6 \\
+    $v_{\min}$ & 2 & m/s & [B] Table I \\
+    $v_{\max}$ & 24 & m/s & [B] Table I \\
+    $\mu_v$ & 13 & m/s & [B] Table I \\
+    $\sigma_v$ & 5 & m/s & [B] Table I \\
     $N_l$ & 8 & lanes & [B] Table I \\
-    $v_{\max}^{\mathrm{road}}$ & 25 & m/s & [A] Section 6 \\
+    $v_{\max}^{\mathrm{road}}$ & 24 & m/s & [B] Table I \\
     $s_m^{\min}$ & 102400 & bits (=100 kbit) & [A] Section 6 \\
     $s_m^{\max}$ & 1024000 & bits (=1000 kbit) & [A] Section 6 \\
     $c_m$ & 1000 & cycles/bit & [A] Section 6 \\
     $\tau_{\mathrm{app}}$ & 1 & s & [A] Section 6 \\
     $\lambda$ & 0.5 & tasks/s & [A] Section 6 \\
-    $f_j$ & $10^{9}$ & Hz & [A] Section 6 \\
-    $f_n$ & $5\times 10^{8}$ & Hz & [A] Section 6 \\
-    $f_u$ & $2\times 10^{9}$ & Hz & Extension (not in [A]/[B]) \\
-    $\kappa$ & $10^{-27}$ & $\mathrm{W}\cdot\mathrm{s}^{3}/\mathrm{cycles}^{3}$ & Extension (not in [A]/[B]) \\
+    $f_j$ & $3\times 10^{9}$ & Hz & [B] Table I (F\textasciicircum{}e) \\
+    $f_n$ & $2\times 10^{9}$ & Hz & Calibrated (scripts/calibrate\_energy.py) \\
+    $f_u$ & $10^{9}$ & Hz & Calibrated; [A] 0.5 GHz, [B] F\textasciicircum{}loc = 2 GHz \\
+    $\kappa$ & $5\times 10^{-28}$ & $\mathrm{W}\cdot\mathrm{s}^{3}/\mathrm{cycles}^{3}$ & Calibrated (scripts/calibrate\_energy.py); [B] Table I uses 1e-27 \\
     $B$ & $10^{6}$ & Hz & [A] Section 6 \\
     $B_{\mathrm{V2V}}$ & $8\times 10^{5}$ & Hz & [A] Section 6 \\
     $W_0$ & $3\times 10^{-13}$ & W & [A] Section 6 \\
@@ -39,18 +41,18 @@
     $d_{i}^{\mathrm{V2I}}$ & 200 & m & Extension (calibrated, T1.7) \\
     $d_{i}^{\mathrm{V2V}}$ & 150 & m & Extension (calibrated, T1.7) \\
     $\tau_{\min}$ & 0.05 & s & Extension (not in [A]/[B]) \\
-    $\omega_{\max}$ & 3 & - & Extension (not in [A]/[B]) \\
     $d_{\mathrm{V2V}}$ & 200 & m & Extension (not in [A]/[B]) \\
     $K_{\mathrm{HE}}$ & 1024 & bits & [A] Section 3.3 \\
     $c^{\mathrm{en}}_m$ & 800 & cycles/bit & [A] Section 6 \\
     $N_f$ & 64 & bits & [B] Table I \\
     $N_i$ & 32 & bits & Extension (decision variable, valid range (0, N\_f]) \\
     $q^{\mathrm{en}}_i$ & 90 & cycles/bit & [B] Table I \\
-    $c_{\mathrm{en}}$ & 890 & cycles/bit & [A] Section 6 + [B] Table I \\
+    $\kappa_N$ & 0.1 & - & Extension (not in [A]/[B]) \\
     $\rho$ & $10^{-4}$ & vehicles/vehicle (ratio, not per $\mathrm{m}^{2}$) & [B] Table I \\
-    $\varpi_1$ & $10^{-5}$ & - & [B] Table I \\
+    $\varpi_s$ & $10^{-7}$ & cents/bit & Calibrated (scripts/calibrate\_energy.py) \\
     $E_{\max}$ & 0.4 & J & [B] Table I \\
     $\lambda^l$ & 1 & cents/J & [A] Section 6 \\
+    $\lambda^j$ & 1 & cents/J & Assumption ([A] Eq(22) lambda\textasciicircum{}j, no value given) \\
     $\lambda^n$ & 0.8 & cents/J & [A] Section 6 \\
     $g_{j0}$ & 1 & cents (normalized) & Extension (not in [A]/[B]) \\
     $g_{n0}$ & 0.5 & cents (normalized) & Extension (not in [A]/[B]) \\

@@ -97,49 +97,24 @@ def test_secure_capacity_scale_is_1e5_not_1e3(model_paper_b):
     assert 1e5 <= u < 1e6
 
 
-def test_varpi_scaled_U_not_saturated():
-    """T0.8 DoD: ϖ₁·U có phương sai KHÁC 0 và cùng bậc với các số hạng khác.
-
-    Lấy mẫu từ phân phối state THỰC của môi trường (không phải rate tổng hợp),
-    vì U phụ thuộc rate mà rate phụ thuộc phân phối khoảng cách thực.
-
-    Bài kiểm này bắt hai lỗi hồi quy:
-    - dùng lại tanh(U): phương sai = 0 (bão hòa) -> đỏ;
-    - dùng lại N_i = 2048: U nhỏ đi ~64 lần, median tụt dưới 1e-3 -> đỏ.
-    """
+def test_security_cost_zero_for_local_and_he_and_monotone_in_block_length():
+    """Phân vai an ninh: local & MEC-Paillier không rủi ro; nhánh AUX rủi ro giảm khi N_i tăng."""
     from src.env.core import VehicularEdgeEnvironment, EnvironmentConfig
 
-    np.random.seed(0)
-    env = VehicularEdgeEnvironment(EnvironmentConfig(
-        episode_length=1000, task_arrival_rate=5.0))
+    env = VehicularEdgeEnvironment(EnvironmentConfig(episode_length=10, attacker_model="expected",
+                                                     background_users_enabled=False))
     env.reset(seed=0)
-    varpi_1 = env.config.varpi_1
+    user = env.users[0]
+    user.position = np.array(env.mec_servers[0].position, dtype=float)
+    env.auxiliary_vehicles[0].position = user.position + np.array([50.0, 0.0])
+    L, R = env.config.alpha_levels, env.config.action_levels
+    assert env.evaluate_action(env.make_action(L - 1, 0, 0))["cost_security"] == 0.0
+    mec = env.evaluate_action(env.make_action(0, 0, 4))
+    assert mec["offload_location"] == "MEC_0" and mec["cost_security"] == 0.0 and mec["bits_at_risk"] == 0.0
+    risks = [env.evaluate_action(env.make_action(0, 1, 4, k))["bits_at_risk"]
+             for k in range(len(env.config.block_length_options))]
+    assert all(r1 >= r2 for r1, r2 in zip(risks, risks[1:])) and risks[0] > risks[-1] == 0.0
 
-    values = []
-    while len(values) < 200:
-        action = env.action_space.sample()
-        _, _, terminated, truncated, info = env.step(action)
-        cap = info.get("task_secure_capacity")
-        if cap is not None and cap > 0:
-            values.append(varpi_1 * cap)
-        if terminated or truncated:
-            env.reset()
-
-    values = np.array(values)
-    # (1) có gradient — đây là lỗi chính mà T0.8 sửa
-    assert values.var() > 0.0, "ϖ₁·U là hằng số — số hạng này không học được gì"
-    assert values.min() >= 0.0
-    # (2) cùng bậc với các số hạng khác trong reward (đều thuộc ~[0,1])
-    assert 1e-3 < np.median(values) < 1.0, (
-        f"median(ϖ₁·U) = {np.median(values):.4g} lệch bậc so với các số hạng khác; "
-        f"chạy scripts/calibrate_varpi.py để hiệu chỉnh lại ϖ₁"
-    )
-    assert np.percentile(values, 95) < 3.0
-
-
-# ---------------------------------------------------------------------------
-# [A] §3.5 — dynamic pricing (T0.7)
-# ---------------------------------------------------------------------------
 def test_aux_price_nonzero_when_idle():
     """[A] §3.5 + MỞ RỘNG T0.7: eps_n >= 1 nên g_n > 0 ngay cả khi AUX rảnh."""
     aux = AuxVehicle(id=0, position=np.array([0.0, 0.0]), cpu_frequency=0.5e9,
@@ -151,33 +126,26 @@ def test_aux_price_nonzero_when_idle():
 
 
 def test_mec_price_exponential_in_urgency():
-    """T0.7 DoD: g_j(omega=2)/g_j(omega=1) = e (dạng exp(omega) của [A] §3.5).
-
-    T1.1: urgency giờ lấy từ tau_eff (deadline động), chặn tại urgency_cap.
-    """
+    """[A] §3.5: g_j ∝ exp(ω), ω = 1/(1+τ_eff) ∈ (0,1)."""
     from src.env.core import VehicularEdgeEnvironment, EnvironmentConfig
     from src.env.entities import Task
 
     env = VehicularEdgeEnvironment(EnvironmentConfig(episode_length=10))
     mec = env.mec_servers[0]
     task = Task(size=1e5, cycles_per_bit=1000, max_delay=1.0)
-    c1 = env._compute_mec_cost(mec, task, resource_level=0, tau_eff=1.0)   # omega = 1
-    c2 = env._compute_mec_cost(mec, task, resource_level=0, tau_eff=0.5)   # omega = 2
-    assert abs(c2 / c1 - np.e) < 1e-6
+    c1 = env._compute_mec_cost(mec, task, resource_level=0, tau_eff=1.0)   # ω = 0.5
+    c2 = env._compute_mec_cost(mec, task, resource_level=0, tau_eff=0.25)  # ω = 0.8
+    assert abs(c2 / c1 - np.exp(0.3)) < 1e-6
 
 
-def test_mec_price_urgency_capped():
-    """T1.1: omega bị chặn tại urgency_cap để exp(omega) không phát nổ khi tau→0."""
+def test_urgency_in_open_unit_interval():
+    """[A] §3.5 yêu cầu ω ∈ (0,1); τ = 1 s → ω = 0.5 (giá trị [A] dùng trong mô phỏng)."""
     from src.env.core import VehicularEdgeEnvironment, EnvironmentConfig
-    from src.env.entities import Task
 
     env = VehicularEdgeEnvironment(EnvironmentConfig(episode_length=10))
-    mec = env.mec_servers[0]
-    task = Task(size=1e5, cycles_per_bit=1000, max_delay=1.0)
-    c_floor = env._compute_mec_cost(mec, task, resource_level=0, tau_eff=0.05)
-    c_cap = env._compute_mec_cost(mec, task, resource_level=0,
-                                  tau_eff=1.0 / env.config.urgency_cap)
-    assert abs(c_floor - c_cap) < 1e-9  # cả hai đều chạm cap
+    assert env._price_urgency(1.0) == pytest.approx(0.5)
+    for tau in (0.0, 0.05, 0.3, 1.0, 100.0):
+        assert 0.0 < env._price_urgency(tau) < 1.0
 
 
 # ---------------------------------------------------------------------------

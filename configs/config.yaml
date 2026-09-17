@@ -19,10 +19,10 @@ general:
   # nghiệm, KHÔNG phải tham số vật lý, nên không nằm trong params_master.yaml.
   num_episodes: 500            # Số episode huấn luyện
   eval_interval: 10            # Đánh giá sau mỗi N episode
+  eval_episodes: 5             # Số episode mỗi lần đánh giá (10×5 → +50% số bước; giảm để train nhanh)
   log_interval: 5              # In log sau mỗi N episode
 
-  # T1.2 (Phương án 1): reward = −(C_u − ϖ₁·U_u) [cents] — không còn weighted-sum
-  varpi_1: ${varpi_1.value}
+  # Reward = −C [cents]: chi phí [A] Eq(22) + rủi ro rò rỉ (env.constraints.leakage_price)
 
 # Quản lý đường dẫn (như đã thảo luận trước đó)
 paths:

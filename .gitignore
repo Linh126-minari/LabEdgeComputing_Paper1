@@ -20,3 +20,9 @@ htmlcov/
 # Checkpoints / Models
 data/checkpoints/
 *.pth
+
+# Data (raw Rio bus GPS 755 MB, clean parquet ~90 MB — tái tạo bằng scripts/preprocess_riobus.py)
+data/unstructured/
+data/processed/riobus/*.parquet
+
+# (đã có __pycache__/ ở trên; bỏ theo dõi các .pyc từng bị commit)

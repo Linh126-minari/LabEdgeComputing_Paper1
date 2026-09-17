@@ -234,62 +234,72 @@ class SumoMobility:
 
 class TraceMobility:
     """
-    Real GPS Trace-backed Mobility Model (Phase 4 - Task T4.2).
-    
-    Reads empirical position (x, y) and velocity (v) trajectories from
-    preprocessed Rio bus dataset and updates entity state at each step.
+    Mobility từ quỹ đạo GPS thật (Phase 4 - T4.2), dữ liệu Rio bus đã tiền xử lý
+    (`scripts/preprocess_riobus.py`, xem BAO_CAO_PHASE4_RIOBUS.md).
+
+    Vị trí được nội suy theo THỜI GIAN mô phỏng (cột `t_rel`), nên trace lưu ở bước
+    1 s vẫn dùng được với dt = 0.1 s. Cột tùy chọn `active` (0/1): slot đang không có
+    xe buýt thật (xe đã rời vùng, chưa có xe thay) — `is_active` trả False.
     """
-    
+
     def __init__(self, trace_df: Any, vehicle_id: str, loop: bool = True):
-        import pandas as pd
         self.vehicle_id = vehicle_id
         self.loop = loop
-        
+
         if trace_df is not None and not trace_df.empty:
-            v_df = trace_df[trace_df["vehicle_id"] == vehicle_id].sort_values("t_rel").reset_index(drop=True)
+            v_df = trace_df[trace_df["vehicle_id"] == vehicle_id]
             if v_df.empty:
-                v_df = trace_df.sort_values("t_rel").reset_index(drop=True)
-            self.positions = v_df[["x_m", "y_m"]].values.astype(float)
-            self.velocities = v_df["v_mps"].values.astype(float)
+                v_df = trace_df
+            v_df = v_df.sort_values("t_rel").reset_index(drop=True)
+            self.times = v_df["t_rel"].to_numpy(dtype=float) - float(v_df["t_rel"].iloc[0])
+            self.positions = v_df[["x_m", "y_m"]].to_numpy(dtype=float)
+            self.velocities = v_df["v_mps"].to_numpy(dtype=float)
+            self.active = (v_df["active"].to_numpy(dtype=int) == 1) if "active" in v_df else np.ones(len(v_df), bool)
         else:
+            self.times = np.array([0.0])
             self.positions = np.array([[0.0, 0.0]], dtype=float)
             self.velocities = np.array([15.0], dtype=float)
-            
+            self.active = np.array([True])
+
         self.num_points = len(self.positions)
-        self.current_idx = 0
-    
+        self.duration = float(self.times[-1])
+        self.t = 0.0
+        self._last_pos = self.positions[0].copy()
+        self._direction = 0.0
+
+    def _idx(self) -> int:
+        return int(np.clip(np.searchsorted(self.times, self.t, side="right") - 1, 0, self.num_points - 1))
+
+    def _position_at(self, t: float) -> np.ndarray:
+        return np.array([np.interp(t, self.times, self.positions[:, 0]),
+                         np.interp(t, self.times, self.positions[:, 1])])
+
     def step(self, position: np.ndarray, velocity: float, dt: float = 0.1) -> np.ndarray:
-        if self.num_points == 0:
-            return position
-        self.current_idx += 1
-        if self.current_idx >= self.num_points:
-            if self.loop:
-                self.current_idx = 0
-            else:
-                self.current_idx = self.num_points - 1
-        return self.positions[self.current_idx].copy()
-    
+        self.t += dt
+        if self.t > self.duration:
+            self.t = (self.t % self.duration) if (self.loop and self.duration > 0) else self.duration
+        pos = self._position_at(self.t)
+        delta = pos - self._last_pos
+        if np.hypot(*delta) > 1e-9:
+            self._direction = float(np.arctan2(delta[1], delta[0]))
+        self._last_pos = pos
+        return pos.copy()
+
     def current_velocity(self) -> float:
-        if self.num_points == 0:
-            return 15.0
-        return float(self.velocities[self.current_idx])
+        return float(np.interp(self.t, self.times, self.velocities))
+
+    @property
+    def is_active(self) -> bool:
+        return bool(self.active[self._idx()])
 
     @property
     def current_direction(self) -> float:
-        if self.num_points < 2:
-            return 0.0
-        prev_idx = max(0, self.current_idx - 1)
-        next_idx = min(self.num_points - 1, self.current_idx)
-        if prev_idx == next_idx:
-            return 0.0
-        dx = self.positions[next_idx][0] - self.positions[prev_idx][0]
-        dy = self.positions[next_idx][1] - self.positions[prev_idx][1]
-        if abs(dx) < 1e-9 and abs(dy) < 1e-9:
-            return 0.0
-        return float(np.arctan2(dy, dx))
-    
+        return self._direction
+
     def generate_initial_state(self) -> Tuple[np.ndarray, float]:
-        self.current_idx = 0
-        if self.num_points == 0:
-            return np.array([0.0, 0.0]), 15.0
+        self.t = 0.0
+        self._last_pos = self.positions[0].copy()
+        if self.num_points > 1:
+            d = self.positions[1] - self.positions[0]
+            self._direction = float(np.arctan2(d[1], d[0])) if np.hypot(*d) > 1e-9 else 0.0
         return self.positions[0].copy(), float(self.velocities[0])

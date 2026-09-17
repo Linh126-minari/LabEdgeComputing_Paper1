@@ -5,6 +5,7 @@ algo: "DDRP" # Tên thuật toán trong [A]. LƯU Ý (T0.11): [A] chỉ dùng Du
              # Double DQN là MỞ RỘNG của dự án — DDQN thuần giữ làm baseline (T2.5)
 
 hyperparameters:
+  use_4d_action: true     # action [α_l, đích, β, N_i] (T3.1); false = ablation không chọn N_i
   learning_rate: 0.001   # Alpha
   gamma: 0.95            # T1.1 bước 6: deadline động tạo coupling thời gian thật
                          # → horizon dài có nghĩa; sweep {0.9, 0.95, 0.99} và báo cáo

@@ -14,6 +14,7 @@ name: "LagrangianDQN"
 algo: "Lagrangian-DDRP"
 
 hyperparameters:
+  use_4d_action: true     # action [α_l, đích, β, N_i] (T3.1); false = ablation không chọn N_i
   learning_rate: 0.001
   gamma: 0.95
   batch_size: 64

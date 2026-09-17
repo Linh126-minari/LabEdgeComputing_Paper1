@@ -46,7 +46,7 @@ class EnvironmentConfig:
     num_users: int = 10
     num_mec_servers: int = 1
     num_auxiliary_vehicles: int = 3
-    num_attack_vehicles: int = 2  # MỞ RỘNG: chỉ minh họa, không tham gia tính toán (T0.9)
+    num_attack_vehicles: int = 11  # attacker vật lý: 11 xe/1 km² → E[nᵉ] trong 150 m ≈ 0.785 = kỳ vọng [B] Eq(8)
 
     # Khu vực mô phỏng — MỞ RỘNG (không có trong [A]/[B])
     sim_area_x: float = 1000.0  # meters
@@ -61,14 +61,14 @@ class EnvironmentConfig:
 
     # Deadline động (T1.1)
     deadline_floor: float = 0.05  # s — MỞ RỘNG: sàn của τ_eff để tránh chia 0
-    urgency_cap: float = 3.0  # MỞ RỘNG: chặn ω trong định giá exp(ω) — [A] chỉ xét τ=1s;
-                              # với deadline động τ→0.05 thì exp(1/τ) phát nổ (e^20)
 
     # CPU & Resources — Ref: [A] Section 6 (f_j = 1 GHz, f_n = 0.5 GHz)
-    mec_cpu_frequency: float = 1e9   # Hz (1 GHz)  [A] §6
-    aux_cpu_frequency: float = 0.5e9  # Hz (0.5 GHz) [A] §6
-    user_cpu_frequency: float = 2e9  # Hz (2 GHz) — MỞ RỘNG
-    kappa: float = 1e-27  # effective capacitance E = κ·c·s·f² — MỞ RỘNG
+    # Hiệu chỉnh (scripts/calibrate_energy.py; DANH_GIA_KIEN_TRUC_THEO_BAI_BAO.md §3.3): edge phải
+    # mạnh hơn xe ([A]: 2×, [B]: F^e/F^loc với q^e ≪ q^c) thì đánh đổi offload mới tồn tại.
+    mec_cpu_frequency: float = 3e9   # F^e = 3 GHz [B] Table I
+    aux_cpu_frequency: float = 2e9   # hiệu chỉnh
+    user_cpu_frequency: float = 1e9  # F^loc tối đa của xe (DVFS) — hiệu chỉnh; [A] 0.5, [B] 2 GHz
+    kappa: float = 5e-28  # E = κ·c·s·f² — hiệu chỉnh; [B] dùng 1e-27
 
     # Channel — Ref: [A] Section 6; δ₀/d₀ tái hiệu chỉnh (T0.5)
     bandwidth_mec: float = 1.0e6   # B = 1 MHz [A]
@@ -106,12 +106,19 @@ class EnvironmentConfig:
     aux_credibility: float = 0.8   # b_n — MỞ RỘNG
     cost_normalization_divisor: float = 1e9  # MỞ RỘNG: chuẩn hóa workload → giga-cycles (T0.7)
     resource_multiplier_step: float = 0.1    # MỞ RỘNG: λ_res = 1 + 0.1·level (T0.7)
-    price_energy_local: float = 1.0  # λ^l = 1 cents/J [A] §6 (T1.2)
-    price_energy_av: float = 0.8     # λ^n = 0.8 cents/J [A] §6 (T1.2)
+    price_energy_local: float = 1.0  # λ^l = 1 cents/J [A] §6 — năng lượng tính local
+    price_energy_mec: float = 1.0    # λ^j — [A] không cho giá trị → giả định = λ^l
+    price_energy_av: float = 0.8     # λ^n = 0.8 cents/J [A] §6 — năng lượng USER ở nhánh AUX ([A] Eq(20),(22))
 
-    # Objective (T1.2 — Phương án 1) & ràng buộc
-    varpi_1: float = 1e-5  # ϖ₁ scale secure capacity U — Ref: [B] Table I (T0.8)
+    # Objective & ràng buộc
+    # Chi phí rủi ro rò rỉ: C_sec = leakage_price · (bit offload) · P_leak, P_leak = 1 − S ([B] Eq(7)).
+    # Local và MEC-Paillier có P_leak = 0 → không thiên lệch về offload (thay thưởng ϖ₁·U cũ).
+    leakage_price: float = 1e-7  # cents/bit-at-risk — hiệu chỉnh (scripts/calibrate_energy.py)
     energy_budget_max: float = 0.4  # E_max (J) — [B] Table I (C3)
+    # DVFS ([B] C4: 0 ≤ f^c, f^en ≤ F^loc): chọn tần số NHỎ NHẤT còn kịp deadline
+    # (năng lượng κ·C·f² tăng theo f). False → luôn chạy F^loc = user_cpu_frequency.
+    dvfs_enabled: bool = True
+    dvfs_min_fraction: float = 0.1  # f_min = 0.1·F^loc (CPU thật có tần số sàn)
     # Chế độ xử lý ràng buộc:
     #   "fixed"    — env tự trừ penalty cố định (baseline / T1.2 bước 4, λ_p ∈ [2,10])
     #   "external" — env trả reward gốc + cờ vi phạm trong info; agent Lagrangian
@@ -120,28 +127,42 @@ class EnvironmentConfig:
     deadline_penalty: float = 5.0        # λ_p — MỞ RỘNG (tạm, thay bằng T1.3)
     energy_violation_penalty: float = 5.0  # cents/J vượt E_max — MỞ RỘNG (tạm, T1.3)
 
-    # Security — hệ HAI LỚP (T0.3 Phương án 1)
+    # Security — PHÂN VAI THEO ĐÍCH (DANH_GIA_KIEN_TRUC_THEO_BAI_BAO.md §3.1):
+    #   MEC (server không tin cậy): Paillier HE [A] — chống cả MEC tò mò lẫn nghe lén → P_leak = 0
+    #   AUX (kênh V2V):            mã khối độ dài N_i [B] — P_leak = 1 − (N_i/N_f)^{n^e}
     encryption_enabled: bool = True
     encryption_mode: str = "simulation"
-    encryption_overhead_cycles_per_bit: float = 890.0  # 800 [A] + 90 [B]
+    he_cycles_per_bit: float = 800.0          # c^en Paillier [A] §6
+    block_cipher_cycles_per_bit: float = 90.0  # q^en [B] Table I
+    block_cipher_round_factor: float = 0.1    # MỞ RỘNG: chi phí mã khối ∝ 1 + κ_N·log2(N_i/8) (số vòng tăng theo độ dài khóa)
     security_level: float = 1.0
 
     # Attacker model & Crypto Scheme (Phase 3 - T3.2, T3.4)
-    attacker_model: str = "expected"   # "expected" [B] vs "realized" (T3.2)
-    crypto_scheme: str = "paillier"   # "paillier", "aes", or "none" (T3.4)
-    ciphertext_expansion: float = 2.0  # 2.0x for Paillier (mod h -> mod h^2), 1.0x for AES (T3.4)
-    use_4d_action: bool = True         # MultiDiscrete[10, 2, 10, 4] with N_i (T3.1)
+    attacker_model: str = "realized"   # "realized" (đếm attacker thật, nᵉ thay đổi theo state) | "expected" [B] Eq(8)
+    crypto_scheme: str = "paillier"   # "paillier" (MEC: HE, AUX: mã khối) | "aes" (cả hai mã khối, MEC giải mã) | "none"
+    ciphertext_expansion: float = 2.0  # Paillier: ciphertext mod h² → 2× khi upload MEC (T3.4)
+    use_4d_action: bool = True         # MultiDiscrete[α, target, β, N_i] (T3.1)
+    block_length_options: Tuple[float, ...] = (8.0, 16.0, 32.0, 64.0)
 
     # Mobility (Phase 4 - T4.2)
     mobility_type: str = "linear"  # "linear", "random_waypoint", or "trace"
     trace_file: str = "data/processed/riobus_corridor.csv"
+    # File nhiều cửa sổ (cột window_id, vd. data/processed/riobus/riobus_train.parquet):
+    # None → mỗi reset() chọn ngẫu nhiên một cửa sổ; đặt id để cố định.
+    trace_window_id: Optional[str] = None
 
     # Attacker model — Ref: [B] Table I, Eq(5)-(9)
     attacker_density: float = 1e-4  # ρ (vehicles/vehicle) [B] Table I (T0.2)
     frame_length_bits: float = 64.0  # N_f [B] Table I (T0.3)
     encryption_block_length_bits: float = 32.0  # N_i — biến quyết định (T3.1)
     lane_count: float = 8.0        # N_l = 8 [B] Table I
-    road_max_speed_mps: float = 25.0  # theo [A]; [B] dùng 24
+    road_max_speed_mps: float = 24.0  # v_max [B] Table I
+
+    # Vận tốc synthetic — [B] Eq(1), Table I: Gauss cắt cụt μ=13, σ=5 trên [2, 24] m/s
+    velocity_mean: float = 13.0
+    velocity_std: float = 5.0
+    velocity_min: float = 2.0
+    velocity_max: float = 24.0
 
     # Background users (T1.5 Mức 2) — users[1:] chạy Algorithm 1 của [A]
     background_users_enabled: bool = True
@@ -169,8 +190,8 @@ class VehicularEdgeEnvironment(gym.Env):
     State (dim = 4 + 2(J+N)): task (size, τ_eff, ω), khoảng cách, utilization, rate.
     Action (3 chiều): [alpha_l_level, target_selection, resource_level]
         - target_selection: 0 = MEC, 1 = AUX (ràng buộc [A] 23b-23d: α_j·α_n = 0)
-    Reward (T1.2, Phương án 1): r = −(C_u − ϖ₁·U_u) [cents], với
-        C_u = λ^l·E_user + λ^n·E_AV + g_j + g_n theo [A] Eq(22).
+    Action: [α_l level, đích (0 MEC / 1 AUX), β level, (N_i index nếu use_4d_action)].
+    Reward: r = −C [cents], C = [A] Eq(22) + chi phí rủi ro rò rỉ (xem _execute_task).
         Ràng buộc T ≤ τ_u ([A] 23e) và E ≤ E_max ([B] C3) xử lý qua penalty_mode.
     step() trả (obs, reward, terminated, truncated, info);
         info["elapsed_time"] = thời gian thực đã trôi (semi-MDP, T1.4);
@@ -209,7 +230,7 @@ class VehicularEdgeEnvironment(gym.Env):
         self.security_module = SecurityModule(key_length=1024) if config.encryption_enabled else None
         self.security_overhead_model = SecurityOverheadModel(
             SecurityOverheadConfig(
-                overhead_cycles_per_bit=config.encryption_overhead_cycles_per_bit,
+                overhead_cycles_per_bit=config.block_cipher_cycles_per_bit,
                 user_cpu_frequency=config.user_cpu_frequency,
                 security_level=config.security_level,
                 frame_length_bits=config.frame_length_bits,
@@ -243,36 +264,98 @@ class VehicularEdgeEnvironment(gym.Env):
         # ==================== Gym Spaces ====================
         state_dim = self._get_state_dim()
         self.observation_space = spaces.Box(low=0, high=1, shape=(state_dim,), dtype=np.float32)
-        self.action_space = spaces.MultiDiscrete([
-            config.alpha_levels,
-            2,  # 0: MEC, 1: AUX
-            config.action_levels,
-        ])
+        nvec = [config.alpha_levels, 2, config.action_levels]   # α_l, đích (0 MEC / 1 AUX), β
+        if config.use_4d_action:
+            nvec.append(len(config.block_length_options))          # N_i (T3.1)
+        self.action_space = spaces.MultiDiscrete(nvec)
 
         self.logger.info(f"Environment initialized with {len(self.users)} users, "
                          f"{len(self.mec_servers)} MEC, {len(self.auxiliary_vehicles)} aux vehicles")
 
     # ==================== Initialization Methods ====================
 
-    def _get_trace_df(self):
-        """Helper to load trace dataset for TraceMobility."""
-        if hasattr(self, "_cached_trace_df"):
-            return self._cached_trace_df
+    def _load_trace_file(self):
+        """Đọc file trace một lần (cache)."""
+        if hasattr(self, "_trace_full_df"):
+            return self._trace_full_df
         from pathlib import Path
         import pandas as pd
         t_path = Path(self.config.trace_file)
+        df = None
         if t_path.exists():
             try:
+                # chỉ đọc cột mobility cần; id dạng category → ít RAM (chạy song song nhiều run)
+                cols = ["window_id", "vehicle_id", "t_rel", "x_m", "y_m", "v_mps", "active"]
                 if t_path.suffix == ".parquet":
-                    df = pd.read_parquet(t_path)
+                    import pyarrow.parquet as pq
+                    df = pd.read_parquet(t_path, columns=[c for c in cols if c in pq.read_schema(t_path).names])
                 else:
                     df = pd.read_csv(t_path)
-                self._cached_trace_df = df
-                return df
-            except Exception:
-                pass
-        self._cached_trace_df = None
-        return None
+                    df = df[[c for c in cols if c in df.columns]]
+                for c in ("window_id", "vehicle_id"):
+                    if c in df.columns:
+                        df[c] = df[c].astype("category")
+            except Exception as e:
+                self.logger.warning(f"Không đọc được trace {t_path}: {e}")
+        else:
+            self.logger.warning(f"Trace file {t_path} không tồn tại — dùng LinearMobility")
+        self._trace_full_df = df
+        return df
+
+    def _select_trace_window(self):
+        """Chọn cửa sổ thời gian (mọi xe trong cửa sổ chung một đồng hồ thật)."""
+        import pandas as pd
+        df = self._load_trace_file()
+        if df is None or df.empty or "window_id" not in df.columns:
+            self._cached_trace_df = df
+            return
+        if self.config.trace_window_id is not None:
+            wid = self.config.trace_window_id
+        else:
+            wids = sorted(map(str, df["window_id"].unique()))
+            wid = wids[np.random.randint(len(wids))]
+        self.trace_window_id = wid
+        self._cached_trace_df = df[df["window_id"] == wid].copy()
+        for c in ("window_id", "vehicle_id"):
+            if isinstance(self._cached_trace_df[c].dtype, pd.CategoricalDtype):
+                self._cached_trace_df[c] = self._cached_trace_df[c].astype(str)
+
+    def _get_trace_df(self):
+        """Helper to load trace dataset for TraceMobility (cửa sổ hiện tại)."""
+        if not hasattr(self, "_cached_trace_df"):
+            self._select_trace_window()
+        return self._cached_trace_df
+
+    def _reset_trace_mobility(self):
+        """reset() ở chế độ trace: chọn lại cửa sổ, gán lại quỹ đạo cho mọi thực thể."""
+        from src.env.mobility import TraceMobility
+        self._select_trace_window()
+        trace_df = self._cached_trace_df
+        if trace_df is None or trace_df.empty:
+            return False
+        # Slot phủ dữ liệu tốt nhất cho users (users[0] là agent), rồi AUX, rồi attacker
+        if "active" in trace_df.columns:
+            cov = trace_df.groupby("vehicle_id")["active"].mean()
+            v_ids = cov.sort_values(ascending=False, kind="stable").index.tolist()
+        else:
+            v_ids = trace_df["vehicle_id"].unique().tolist()
+        entities = [*self.users, *self.auxiliary_vehicles]   # attacker luôn synthetic
+        for i, entity in enumerate(entities):
+            mob = TraceMobility(trace_df, vehicle_id=str(v_ids[i % len(v_ids)]))
+            entity.mobility_model = mob
+            entity.position, v0 = mob.generate_initial_state()
+            if hasattr(entity, "velocity"):
+                entity.velocity = v0
+        return True
+
+    def _sample_velocity(self) -> float:
+        """[B] Eq(1): Gauss cắt cụt N(μ, σ²) trên [v_min, v_max] (lấy mẫu loại bỏ)."""
+        cfg = self.config
+        for _ in range(1000):
+            v = np.random.normal(cfg.velocity_mean, cfg.velocity_std)
+            if cfg.velocity_min <= v <= cfg.velocity_max:
+                return float(v)
+        return float(np.clip(cfg.velocity_mean, cfg.velocity_min, cfg.velocity_max))
 
     def _init_users(self):
         trace_df = self._get_trace_df() if self.config.mobility_type == "trace" else None
@@ -288,7 +371,7 @@ class VehicularEdgeEnvironment(gym.Env):
                     np.random.uniform(0, self.config.sim_area_x),
                     np.random.uniform(0, self.config.sim_area_y)
                 ])
-                velocity = np.random.uniform(15, 25)  # m/s, Ref: [A] §6
+                velocity = self._sample_velocity()  # [B] Eq(1)
                 mob = LinearMobility()
 
             user = User(
@@ -332,7 +415,7 @@ class VehicularEdgeEnvironment(gym.Env):
                     np.random.uniform(0, self.config.sim_area_x),
                     np.random.uniform(0, self.config.sim_area_y)
                 ])
-                velocity = np.random.uniform(15, 25)
+                velocity = self._sample_velocity()  # [B] Eq(1)
                 mob = LinearMobility()
 
             aux = AuxVehicle(
@@ -348,16 +431,10 @@ class VehicularEdgeEnvironment(gym.Env):
             self.auxiliary_vehicles.append(aux)
 
     def _init_attack_vehicles(self):
-        """T0.9: chỉ minh họa — mô hình bảo mật dùng kỳ vọng mật độ [B] Eq(8)."""
-        trace_df = self._get_trace_df() if self.config.mobility_type == "trace" else None
-        v_ids = trace_df["vehicle_id"].unique().tolist() if trace_df is not None and not trace_df.empty else []
-
+        """Attacker vật lý (attacker_model="realized"). Luôn synthetic, kể cả khi mobility là trace:
+        dữ liệu Rio chỉ có xe buýt, nên attacker là mật độ xe con giả định (DANH_GIA_KIEN_TRUC §3.1)."""
         for i in range(self.config.num_attack_vehicles):
-            if trace_df is not None and v_ids:
-                veh_id = str(v_ids[(i + self.config.num_users + self.config.num_auxiliary_vehicles) % len(v_ids)])
-                mob = TraceMobility(trace_df, vehicle_id=veh_id)
-                pos, _ = mob.generate_initial_state()
-            else:
+            if True:
                 pos = np.array([
                     np.random.uniform(0, self.config.sim_area_x),
                     np.random.uniform(0, self.config.sim_area_y)
@@ -371,12 +448,12 @@ class VehicularEdgeEnvironment(gym.Env):
 
     def _get_state_dim(self) -> int:
         """
-        dim = 4 + 2·(J + N): task (3) + distances (J+N) + utilization (J+N) + rate (1).
-        T0.10: không còn chiều chết (dummy SNR, d_att, security_level).
+        dim = 5 + 2·(J + N): task (3) + distances (J+N) + utilization (J+N) + rate (1)
+        + số attacker nᵉ trong tầm phát V2V (1) — [B] giả định người gửi biết nᵉ để chọn N_i (Eq 39).
         """
-        j = len(self.mec_servers)
-        n = len(self.auxiliary_vehicles)
-        return 4 + 2 * (j + n)
+        j = self.config.num_mec_servers
+        n = self.config.num_auxiliary_vehicles
+        return 5 + 2 * (j + n)
 
     # ==================== T1.1 — Residence time / deadline động ====================
 
@@ -447,19 +524,27 @@ class VehicularEdgeEnvironment(gym.Env):
 
     # ==================== T1.6 — Action masking ====================
 
+    @staticmethod
+    def _is_present(entity) -> bool:
+        """Trace-slot không có xe buýt thật (active=0) coi như không tồn tại (T4.2)."""
+        return getattr(entity.mobility_model, "is_active", True)
+
     def _mec_feasible(self, user: User) -> bool:
+        if not self._is_present(user):
+            return False
         floor = self.config.resource_floor_fraction * self.config.mec_cpu_frequency
         return bool(self.mec_servers) and self.mec_servers[0].is_covered(user) \
             and self.mec_cpu_available[0] > floor
 
     def _aux_feasible(self, user: User) -> Tuple[bool, Optional[int]]:
         """AUX khả thi nếu trong tầm V2V, RẢNH ([A] §3.4: ≤1 user/AV) và còn tài nguyên."""
-        if not self.auxiliary_vehicles:
+        if not self.auxiliary_vehicles or not self._is_present(user):
             return False, None
         floor = self.config.resource_floor_fraction * self.config.aux_cpu_frequency
         candidates = [
             (user.get_distance(a), i) for i, a in enumerate(self.auxiliary_vehicles)
             if user.get_distance(a) <= self.config.v2v_range
+            and self._is_present(a)
             and a.current_load == 0
             and self.aux_cpu_available[i] > floor
         ]
@@ -469,23 +554,73 @@ class VehicularEdgeEnvironment(gym.Env):
 
     def action_mask(self, user: Optional[User] = None) -> np.ndarray:
         """
-        T1.6: mask (flatten (alpha_levels·2·action_levels,), C-order — khớp
-        np.ravel_multi_index của agent). True = khả thi.
+        T1.6: mask phẳng theo C-order của action_space.nvec — khớp np.ravel_multi_index. True = khả thi.
 
-        - α_l = 1 (level cuối) luôn khả thi (không có phần remote).
-        - target = 0 (MEC) đòi hỏi trong vùng phủ + còn tài nguyên.
-        - target = 1 (AUX) đòi hỏi có AUX trong tầm, rảnh, còn tài nguyên.
+        - α_l = 1 (level cuối) luôn khả thi.
+        - Đích MEC cần vùng phủ + tài nguyên; AUX cần AUX trong tầm, rảnh, còn tài nguyên.
+        - Slot trace inactive (T4.2) → không offload.
+        - N_i (4D): chỉ có nghĩa với nhánh mã khối → nhánh khác cố định ở N_i mặc định
+          (loại action trùng lặp).
         """
         user = user or self.users[0]
-        L, T, R = self.config.alpha_levels, 2, self.config.action_levels
-        mask = np.zeros((L, T, R), dtype=bool)
-        mask[L - 1, :, :] = True  # α_l = 1: luôn khả thi
-        if self._mec_feasible(user):
-            mask[:, 0, :] = True
-        aux_ok, _ = self._aux_feasible(user)
-        if aux_ok:
-            mask[:, 1, :] = True
+        nvec = tuple(int(n) for n in self.action_space.nvec)
+        L = nvec[0]
+        mask = np.zeros(nvec, dtype=bool)
+        ok = {0: self._mec_feasible(user), 1: self._aux_feasible(user)[0]}
+        if len(nvec) == 3:
+            mask[L - 1] = True
+            for t in (0, 1):
+                if ok[t]:
+                    mask[:, t, :] = True
+            return mask.flatten()
+        default_k = self._default_block_index()
+        mask[L - 1, :, :, default_k] = True
+        for t in (0, 1):
+            if not ok[t]:
+                continue
+            if self._cipher_for("mec" if t == 0 else "aux") == "block":
+                mask[:-1, t, :, :] = True
+            else:
+                mask[:-1, t, :, default_k] = True
         return mask.flatten()
+
+    # ---------- dry-run (baseline Greedy/CMSO, hiệu chỉnh) ----------
+    def snapshot_resources(self):
+        return (list(self.mec_cpu_available), list(self.mec_bw_available), list(self.aux_cpu_available),
+                list(self.aux_bw_available), list(self.active_allocations),
+                [a.current_load for a in self.auxiliary_vehicles], self.rejected_resource_count)
+
+    def restore_resources(self, snap):
+        (mc, mb, ac, ab, alloc, loads, rej) = snap
+        self.mec_cpu_available, self.mec_bw_available = list(mc), list(mb)
+        self.aux_cpu_available, self.aux_bw_available = list(ac), list(ab)
+        self.active_allocations, self.rejected_resource_count = list(alloc), rej
+        for a, l in zip(self.auxiliary_vehicles, loads):
+            a.current_load = l
+
+    def evaluate_action(self, action: np.ndarray, user: Optional[User] = None) -> Dict[str, Any]:
+        """Chạy thử action cho task đầu hàng đợi của user, KHÔNG thay đổi trạng thái env."""
+        user = user or self.users[0]
+        task = self.task_queue[user.id][0]
+        tau_eff, _ = self.effective_deadline(user, task)
+        al, aj, an, lvl, blk = self._decode_action_to_alphas(action)
+        snap = self.snapshot_resources()
+        try:
+            return self._execute_task(user, task, al, aj, an, lvl, tau_eff, blk)
+        finally:
+            self.restore_resources(snap)
+
+    def make_action(self, alpha_level: int, target: int, resource_level: int, block_index: Optional[int] = None) -> np.ndarray:
+        """Tạo action đúng số chiều của action_space (3 hoặc 4)."""
+        a = [alpha_level, target, resource_level]
+        if len(self.action_space.nvec) == 4:
+            a.append(self._default_block_index() if block_index is None else block_index)
+        return np.array(a, dtype=np.int64)
+
+    def _default_block_index(self) -> int:
+        opts = list(self.config.block_length_options)
+        target = self.config.encryption_block_length_bits
+        return int(np.argmin([abs(o - target) for o in opts]))
 
     # ==================== Gymnasium API (T1.4) ====================
 
@@ -494,11 +629,14 @@ class VehicularEdgeEnvironment(gym.Env):
         if seed is not None:
             np.random.seed(seed)
 
-        for entity in [*self.users, *self.auxiliary_vehicles, *self.attack_vehicles]:
+        trace_reset = self.config.mobility_type == "trace" and self._reset_trace_mobility()
+        for entity in (self.attack_vehicles if trace_reset else [*self.users, *self.auxiliary_vehicles, *self.attack_vehicles]):
             entity.position = np.array([
                 np.random.uniform(0, self.config.sim_area_x),
                 np.random.uniform(0, self.config.sim_area_y)
             ])
+            if hasattr(entity, "velocity"):
+                entity.velocity = self._sample_velocity()   # mỗi episode một mẫu vận tốc [B] Eq(1)
 
         self.current_time = 0.0
         self.step_count = 0
@@ -620,6 +758,8 @@ class VehicularEdgeEnvironment(gym.Env):
             "task_cost_service": metrics["cost_service"],
             "task_cost_energy": metrics["cost_energy"],
             "task_security_risk": metrics["security_risk"],
+            "task_cost_security": metrics["cost_security"],
+            "task_block_length": metrics["block_length"],
             "task_secure_capacity": metrics["secure_capacity"],
             "deadline_violated": metrics["viol_T"],
             "energy_violation": metrics["viol_E"],
@@ -648,7 +788,7 @@ class VehicularEdgeEnvironment(gym.Env):
 
         block_length_bits = self.config.encryption_block_length_bits
         if action_arr.size >= 4:
-            n_i_options = (8.0, 16.0, 32.0, 64.0)
+            n_i_options = tuple(self.config.block_length_options)
             n_i_idx = int(np.clip(action_arr[3], 0, len(n_i_options) - 1))
             block_length_bits = n_i_options[n_i_idx]
 
@@ -677,138 +817,65 @@ class VehicularEdgeEnvironment(gym.Env):
         """
         Thực thi một task cho user bất kỳ (T1.5: tách khỏi users[0]).
 
-        Thực thi các ràng buộc:
-        - Σβ ≤ 1 ([A] 23j): cấp phát là phần trăm của pool CÒN LẠI; nếu còn lại
-          dưới resource_floor_fraction → TỪ CHỐI (đếm rejected_resource_count).
-        - Mỗi AUX phục vụ ≤ 1 user ([A] §3.4): chỉ AUX có current_load == 0
-          mới nhận task.
+        - Σβ ≤ 1 ([A] 23j): cấp phát là % pool CÒN LẠI; dưới resource_floor_fraction → từ chối.
+        - Mỗi AUX phục vụ ≤ 1 user ([A] §3.4).
+        - CPU xe user: mã hóa (phần offload) rồi tính local, TUẦN TỰ trên một CPU, tần số chọn
+          bằng DVFS ([B] C4); nhánh remote chạy song song sau mã hóa.
+        - An ninh phân vai: MEC ← Paillier HE (P_leak = 0), AUX ← mã khối N_i (P_leak = 1 − S).
+        - Chi phí ([A] Eq(22) + rủi ro): C = λ^l·E_local + λ^b·E_branch + g_b + C_sec,
+          E_branch = E_enc + E_tx + E_wait của user cho nhánh b ∈ {MEC (λ^j), AUX (λ^n)}.
         """
         cfg = self.config
+        n_i = float(block_length_bits if block_length_bits is not None else cfg.encryption_block_length_bits)
 
-        # Mã hóa tuần tự cho phần offload
-        offload_size = task.size * (alpha_j + alpha_n)
-        t_enc, E_enc = 0.0, 0.0
-        if cfg.encryption_enabled and offload_size > 0:
-            t_enc = self._estimate_encryption_overhead(offload_size, block_length_bits=block_length_bits)
-            E_enc = self.security_overhead_model.encryption_energy(offload_size, kappa=cfg.kappa, block_length_bits=block_length_bits)
-
-        energy_user = 0.0        # J — năng lượng của xe user
-        energy_remote = 0.0      # J — năng lượng tính toán của AV ([A] Eq(22), λ^n)
-        cost_service = 0.0       # cents — giá dịch vụ động g_j/g_n
-        security_risk = 0.0
-        secure_capacity = 0.0
+        C_local = 0.0            # CPU cycles tính local (gồm cả nhánh fallback)
+        remote: Optional[Dict[str, Any]] = None
         offload_locations: List[str] = []
-        branch_delays: List[float] = []
-        local_branch_delays: List[float] = []
-        remote_branch_delays: List[float] = []
 
-        # ---- Local branch ----
         local_task = self._make_subtask(task, alpha_l)
         if local_task is not None:
-            d = self._compute_local_delay(user, local_task)
-            branch_delays.append(d)
-            local_branch_delays.append(d)
-            energy_user += self._compute_local_energy(user, local_task)
+            C_local += local_task.cycles_per_bit * local_task.size
             offload_locations.append("local")
 
-        # ---- MEC branch ----
-        mec_task = self._make_subtask(task, alpha_j)
-        if mec_task is not None:
-            done_flag = False
-            if self._mec_feasible(user):
-                mec = self.mec_servers[0]
-                cpu_freq = max(1.0, self._get_resource_allocation(
-                    self.mec_cpu_available[0], resource_level))
-                bw = max(1.0, self._get_bandwidth_allocation(
-                    self.mec_bw_available[0], resource_level))
-
-                mec_delay, mec_risk, tx_time, mec_cap = self._compute_mec_delay(
-                    user, mec, mec_task, cpu_freq, bw, block_length_bits=block_length_bits)
-                energy_user += self._compute_offloading_energy(user, mec_task, tx_time)
-                cost_service += self._compute_mec_cost(mec, mec_task, resource_level, tau_eff)
-
-                security_risk += alpha_j * mec_risk
-                secure_capacity += alpha_j * mec_cap
-                branch_delays.append(mec_delay)
-                remote_branch_delays.append(mec_delay)
-
-                self.mec_cpu_available[0] = max(0.0, self.mec_cpu_available[0] - cpu_freq)
-                self.mec_bw_available[0] = max(0.0, self.mec_bw_available[0] - bw)
-                self.active_allocations.append(
-                    (self.current_time + mec_delay, "mec", 0, cpu_freq, bw))
-                offload_locations.append("MEC_0")
-                done_flag = True
+        # α_j·α_n = 0 ([A] 23b-c) → tối đa một nhánh remote
+        for kind, frac in (("mec", alpha_j), ("aux", alpha_n)):
+            sub = self._make_subtask(task, frac)
+            if sub is None:
+                continue
+            branch = self._offload_branch(user, kind, sub, frac, resource_level, tau_eff, n_i)
+            if branch is None:   # không khả thi → xử lý local
+                C_local += sub.cycles_per_bit * sub.size
+                offload_locations.append(f"local_fallback_{kind}")
             else:
-                if self.mec_servers and self.mec_servers[0].is_covered(user):
-                    self.rejected_resource_count += 1  # trong vùng phủ nhưng hết tài nguyên
+                remote = branch
+                offload_locations.append(branch["label"])
 
-            if not done_flag:
-                d = self._compute_local_delay(user, mec_task)
-                branch_delays.append(d)
-                local_branch_delays.append(d)
-                energy_user += self._compute_local_energy(user, mec_task)
-                offload_locations.append("local_fallback_mec")
+        # ---- DVFS & tổng hợp thời gian ----
+        t_remote = remote["delay"] if remote else 0.0
+        C_enc = remote["enc_cycles"] if remote else 0.0
+        f_enc, f_loc = self._dvfs_frequencies(C_enc, C_local, t_remote, tau_eff, user.cpu_frequency)
+        t_enc = C_enc / f_enc if C_enc > 0 else 0.0
+        t_local = C_local / f_loc if C_local > 0 else 0.0
+        delay = t_enc + max(t_local, t_remote)
 
-        # ---- AUX branch ----
-        aux_task = self._make_subtask(task, alpha_n)
-        if aux_task is not None:
-            done_flag = False
-            aux_ok, aux_idx = self._aux_feasible(user)
-            if aux_ok:
-                aux = self.auxiliary_vehicles[aux_idx]
-                cpu_freq = max(1.0, self._get_resource_allocation(
-                    self.aux_cpu_available[aux_idx], resource_level))
-                bw = max(1.0, self._get_bandwidth_allocation(
-                    self.aux_bw_available[aux_idx], resource_level))
+        # ---- Năng lượng user ----
+        E_local = cfg.kappa * C_local * f_loc ** 2
+        E_enc = cfg.kappa * C_enc * f_enc ** 2
+        E_tx = remote["tx_energy"] if remote else 0.0
+        E_wait = cfg.user_idle_power * max(0.0, t_remote - t_local) if remote else 0.0   # T0.6
+        E_branch = E_enc + E_tx + E_wait
+        energy_user = E_local + E_branch
 
-                aux_delay, aux_risk, tx_time, aux_cap = self._compute_v2v_delay(
-                    user, aux, aux_task, cpu_freq, bw, block_length_bits=block_length_bits)
-                energy_user += self._compute_offloading_energy(user, aux_task, tx_time)
-                cost_service += self._compute_aux_cost(aux, aux_task, resource_level, tau_eff)
-                # [A] Eq(22): năng lượng tính toán của AV quy tiền qua λ^n (T1.2)
-                energy_remote += cfg.kappa * aux_task.size * aux_task.cycles_per_bit * cpu_freq ** 2
+        # ---- Chi phí ([A] Eq(22)) + rủi ro rò rỉ ----
+        branch_price = 0.0
+        if remote:
+            branch_price = cfg.price_energy_mec if remote["kind"] == "mec" else cfg.price_energy_av
+        cost_energy = cfg.price_energy_local * E_local + branch_price * E_branch
+        cost_service = remote["price"] if remote else 0.0
+        bits_at_risk = remote["bits_at_risk"] if remote else 0.0
+        cost_security = cfg.leakage_price * bits_at_risk
+        cost_total = cost_energy + cost_service + cost_security
 
-                security_risk += alpha_n * aux_risk
-                secure_capacity += alpha_n * aux_cap
-                branch_delays.append(aux_delay)
-                remote_branch_delays.append(aux_delay)
-
-                self.aux_cpu_available[aux_idx] = max(0.0, self.aux_cpu_available[aux_idx] - cpu_freq)
-                self.aux_bw_available[aux_idx] = max(0.0, self.aux_bw_available[aux_idx] - bw)
-                aux.current_load += 1  # [A] §3.4: giờ AUX này bận (≤ 1 user)
-                self.active_allocations.append(
-                    (self.current_time + aux_delay, "aux", aux_idx, cpu_freq, bw))
-                offload_locations.append(f"Aux_{aux_idx}")
-                done_flag = True
-            else:
-                near = self._nearest_aux(user)
-                if near is not None and user.get_distance(near) <= cfg.v2v_range:
-                    self.rejected_resource_count += 1  # trong tầm nhưng AUX bận/hết tài nguyên
-
-            if not done_flag:
-                d = self._compute_local_delay(user, aux_task)
-                branch_delays.append(d)
-                local_branch_delays.append(d)
-                energy_user += self._compute_local_energy(user, aux_task)
-                offload_locations.append("local_fallback_aux")
-
-        # ---- Tổng hợp ----
-        max_parallel = max(branch_delays) if branch_delays else 0.0
-        delay = t_enc + max_parallel
-        energy_user += E_enc
-
-        # E^w (T0.6): p_w · max(0, T_remote − T_local)
-        t_local_busy = max(local_branch_delays) if local_branch_delays else 0.0
-        t_remote_max = max(remote_branch_delays) if remote_branch_delays else 0.0
-        E_wait = cfg.user_idle_power * max(0.0, t_remote_max - t_local_busy)
-        energy_user += E_wait
-        E_compute_tx = energy_user - E_enc - E_wait
-
-        # T1.2: quy đổi năng lượng thành tiền ([A] Eq(22))
-        cost_energy = cfg.price_energy_local * energy_user + cfg.price_energy_av * energy_remote
-        cost_total = cost_energy + cost_service
-
-        # Ràng buộc
         viol_T = bool(delay > tau_eff)
         viol_E = float(max(0.0, energy_user - cfg.energy_budget_max))
         if not viol_T:
@@ -821,20 +888,96 @@ class VehicularEdgeEnvironment(gym.Env):
         return {
             "delay": delay,
             "energy_user": energy_user,
-            "energy_remote": energy_remote,
+            "energy_local": E_local,
             "energy_enc": E_enc,
             "energy_wait": E_wait,
-            "energy_compute_tx": E_compute_tx,
+            "energy_compute_tx": energy_user - E_enc - E_wait,
             "cost_service": cost_service,
             "cost_energy": cost_energy,
+            "cost_security": cost_security,
             "cost_total": cost_total,
-            "security_risk": security_risk,
-            "secure_capacity": secure_capacity,
+            "security_risk": remote["frac"] * remote["p_leak"] if remote else 0.0,   # tỉ lệ bit của task bị đe dọa
+            "bits_at_risk": bits_at_risk,
+            "secure_capacity": remote["frac"] * remote["rate"] * (1.0 - remote["p_leak"]) if remote else 0.0,
+            "secure_info_capacity_B": remote["U_B"] if remote else 0.0,   # [B] Eq(9), chỉ nhánh mã khối
+            "block_length": n_i if (remote and remote["cipher"] == "block") else 0.0,
             "viol_T": viol_T,
             "viol_E": viol_E,
             "failure_cause": failure_cause,
             "offload_location": "+".join(offload_locations) if offload_locations else "none",
         }
+
+    def _cipher_for(self, kind: str) -> str:
+        """'he' | 'block' | 'none' cho nhánh MEC/AUX theo crypto_scheme."""
+        cfg = self.config
+        if not cfg.encryption_enabled or cfg.crypto_scheme == "none":
+            return "none"
+        if kind == "mec" and cfg.crypto_scheme == "paillier":
+            return "he"
+        return "block"
+
+    def _offload_branch(self, user: User, kind: str, sub: Task, frac: float, resource_level: int,
+                        tau_eff: float, n_i: float) -> Optional[Dict[str, Any]]:
+        """Một nhánh offload (MEC [A] Eq(10)-(12) / AUX [A] Eq(15)-(18)); None nếu không khả thi.
+        Có tác dụng phụ: chiếm tài nguyên (Σβ ≤ 1), AUX bận (≤ 1 user)."""
+        cfg = self.config
+        cipher = self._cipher_for(kind)
+        if kind == "mec":
+            if not self._mec_feasible(user):
+                if self.mec_servers and self.mec_servers[0].is_covered(user):
+                    self.rejected_resource_count += 1
+                return None
+            node, idx = self.mec_servers[0], 0
+            cpu_pool, bw_pool = self.mec_cpu_available, self.mec_bw_available
+            rate = self.channel_model.get_uplink_rate_mec(user.get_distance(node), user.tx_power)
+            sec_range = cfg.security_range_v2i
+        else:
+            ok, idx = self._aux_feasible(user)
+            if not ok:
+                near = self._nearest_aux(user)
+                if near is not None and user.get_distance(near) <= cfg.v2v_range:
+                    self.rejected_resource_count += 1
+                return None
+            node = self.auxiliary_vehicles[idx]
+            cpu_pool, bw_pool = self.aux_cpu_available, self.aux_bw_available
+            rate = self.channel_model.get_uplink_rate_v2v(user.get_distance(node), user.tx_power)
+            sec_range = cfg.security_range_v2v
+
+        cpu_freq = max(1.0, self._get_resource_allocation(cpu_pool[idx], resource_level))
+        bw = max(1.0, self._get_bandwidth_allocation(bw_pool[idx], resource_level))
+
+        # Mã hóa, kích thước truyền, giải mã, rủi ro
+        if cipher == "he":
+            enc_cycles = cfg.he_cycles_per_bit * sub.size / max(cfg.security_level, 1e-6)
+            tx_bits = sub.size * cfg.ciphertext_expansion
+            dec_cycles, p_leak, U_B = 0.0, 0.0, 0.0          # HE: server tính trên ciphertext [A] §3.3
+        elif cipher == "block":
+            enc_cycles = self._encryption_cycles(sub.size, n_i)
+            tx_bits = sub.size
+            p_att, U_B = self._compute_security_metrics(sec_range, rate, n_i, user)
+            if kind == "mec":   # "aes": MEC phải giải mã → server tò mò đọc được dữ liệu
+                dec_cycles, p_leak = cfg.block_cipher_cycles_per_bit * sub.size, 1.0
+            else:
+                dec_cycles, p_leak = 0.0, p_att
+        else:
+            enc_cycles, tx_bits, dec_cycles, p_leak, U_B = 0.0, sub.size, 0.0, 1.0, 0.0
+
+        tx_time = tx_bits / max(rate, 1.0)
+        exe_time = (sub.cycles_per_bit * sub.size + dec_cycles) / cpu_freq
+        delay = tx_time + exe_time
+        price = (self._compute_mec_cost(node, sub, resource_level, tau_eff) if kind == "mec"
+                 else self._compute_aux_cost(node, sub, resource_level, tau_eff))
+
+        cpu_pool[idx] = max(0.0, cpu_pool[idx] - cpu_freq)
+        bw_pool[idx] = max(0.0, bw_pool[idx] - bw)
+        if kind == "aux":
+            node.current_load += 1   # [A] §3.4
+        self.active_allocations.append((self.current_time + delay, kind, idx, cpu_freq, bw))
+
+        return {"kind": kind, "label": "MEC_0" if kind == "mec" else f"Aux_{idx}", "cipher": cipher,
+                "frac": frac, "rate": rate, "delay": delay, "tx_energy": user.tx_power * tx_time,
+                "enc_cycles": enc_cycles, "price": price, "p_leak": p_leak,
+                "bits_at_risk": sub.size * p_leak, "U_B": U_B}
 
     # ==================== T1.5 Mức 2 — Background users (Algorithm 1 [A]) ====================
 
@@ -867,7 +1010,7 @@ class VehicularEdgeEnvironment(gym.Env):
     def _run_background_users(self):
         """users[1:] hành động mỗi slot — chiếm tài nguyên THẬT (T1.5 Mức 2)."""
         for user in self.users[1:]:
-            if not self.task_queue[user.id]:
+            if not self.task_queue[user.id] or not self._is_present(user):
                 continue
             task = self.task_queue[user.id].pop(0)
             # chặn backlog: bỏ task tồn quá 5 (tránh queue nổ khi kẹt tài nguyên)
@@ -947,59 +1090,14 @@ class VehicularEdgeEnvironment(gym.Env):
         """t_local = c·s / f_u. Ref: [A] Eq(11)."""
         return (task.cycles_per_bit * task.size) / user.cpu_frequency
 
-    def _compute_mec_delay(self, user: User, mec: MECServer, task: Task,
-                           cpu_freq: float, bandwidth: float,
-                           block_length_bits: Optional[float] = None) -> Tuple[float, float, float, float]:
-        """
-        t_mec = t_upload + t_compute. Ref: [A] Eq(10), Eq(12).
-        T0.9: p_att KHÔNG làm giảm rate (eavesdropping thụ động theo [B]).
-        Bỏ qua downlink theo [A] §3.4 / [B] §II-B.
-        T3.4: ciphertext_expansion và decryption_overhead_cycles.
-        """
-        dist = user.get_distance(mec)
-        uplink_rate = self.channel_model.get_uplink_rate_mec(dist, user.tx_power)
-        attack_prob, secure_capacity = self._compute_security_metrics(
-            d_sender_range=self.config.security_range_v2i, link_rate_bps=uplink_rate,
-            block_length_bits=block_length_bits, user=user)
-
-        expansion = getattr(self.config, "ciphertext_expansion", 1.0)
-        if getattr(self.config, "crypto_scheme", "paillier") == "none":
-            expansion = 1.0
-
-        tx_size = task.size * expansion
-        upload_time = tx_size / max(uplink_rate, 1.0)
-
-        # Decryption overhead (AES has decryption on receiver, Paillier doesn't)
-        dec_cycles = 0.0
-        if getattr(self.config, "crypto_scheme", "paillier") == "aes":
-            dec_cycles = 90.0 * task.size
-
-        computation_time = (task.cycles_per_bit * task.size + dec_cycles) / cpu_freq
-        return upload_time + computation_time, attack_prob, upload_time, secure_capacity
-
-    def _compute_v2v_delay(self, user: User, aux: AuxVehicle, task: Task,
-                           cpu_freq: float, bandwidth: float,
-                           block_length_bits: Optional[float] = None) -> Tuple[float, float, float, float]:
-        """t_aux = t_v2v + t_compute. Ref: [A] Eq(17), Eq(18)."""
-        dist = user.get_distance(aux)
-        v2v_rate = self.channel_model.get_uplink_rate_v2v(dist, user.tx_power)
-        attack_prob, secure_capacity = self._compute_security_metrics(
-            d_sender_range=self.config.security_range_v2v, link_rate_bps=v2v_rate,
-            block_length_bits=block_length_bits, user=user)
-
-        expansion = getattr(self.config, "ciphertext_expansion", 1.0)
-        if getattr(self.config, "crypto_scheme", "paillier") == "none":
-            expansion = 1.0
-
-        tx_size = task.size * expansion
-        transmission_time = tx_size / max(v2v_rate, 1.0)
-
-        dec_cycles = 0.0
-        if getattr(self.config, "crypto_scheme", "paillier") == "aes":
-            dec_cycles = 90.0 * task.size
-
-        computation_time = (task.cycles_per_bit * task.size + dec_cycles) / cpu_freq
-        return transmission_time + computation_time, attack_prob, transmission_time, secure_capacity
+    def attackers_in_range(self, user: Optional[User], d_sender_range: float) -> float:
+        """nᵉ: đếm attacker thật trong bán kính phát ("realized", T3.2) hoặc kỳ vọng [B] Eq(8)."""
+        if self.config.attacker_model == "realized" and user is not None:
+            return float(sum(1 for att in self.attack_vehicles
+                             if self._is_present(att) and user.get_distance(att) <= d_sender_range))
+        return self.security_overhead_model.expected_attackers(
+            coverage_radius_m=d_sender_range, attacker_density=self.config.attacker_density,
+            lane_count=self.config.lane_count, max_speed_mps=self.config.road_max_speed_mps)
 
     def _compute_security_metrics(self, d_sender_range: float,
                                   link_rate_bps: float,
@@ -1015,33 +1113,48 @@ class VehicularEdgeEnvironment(gym.Env):
         n_i_val = block_length_bits if block_length_bits is not None else self.config.encryption_block_length_bits
         n_i = min(max(float(n_i_val), 1.0), n_f)
 
-        if getattr(self.config, "attacker_model", "expected") == "realized" and user is not None:
-            n_e = float(sum(1 for att in self.attack_vehicles if user.get_distance(att) <= d_sender_range))
-        else:
-            n_e = self.security_overhead_model.expected_attackers(
-                coverage_radius_m=d_sender_range,
-                attacker_density=self.config.attacker_density,
-                lane_count=self.config.lane_count,
-                max_speed_mps=self.config.road_max_speed_mps,
-            )
+        n_e = self.attackers_in_range(user, d_sender_range)
 
         s = self.security_overhead_model.security_strength(n_i, n_f, n_e)
         p_att = self.security_overhead_model.attack_success_probability(n_i, n_f, n_e)
         u = self.security_overhead_model.secure_information_capacity(link_rate_bps, n_i, s)
         return p_att, u
 
-    def _estimate_encryption_overhead(self, data_size_bits: float, block_length_bits: Optional[float] = None) -> float:
-        """t_enc = c_en(N_i)·s/f. Ref: [A] Eq(4)."""
-        if not self.config.encryption_enabled:
-            return 0.0
-        if self.config.encryption_mode == "simulation":
-            return self.security_overhead_model.encryption_time(data_size_bits, block_length_bits=block_length_bits)
-        if self.security_module is None:
-            return 0.0
-        duration, _ = self.security_module.perform_real_encryption_benchmark(1.0)
-        return duration * (data_size_bits / 1024.0)
+    def _encryption_cycles(self, data_size_bits: float, block_length_bits: Optional[float] = None) -> float:
+        """Mã khối [B]: q^en·(1 + κ_N·log2(N_i/8))·s. Chi phí tăng theo N_i là MỞ RỘNG (số vòng
+        tăng theo độ dài khóa, vd AES-128/192/256 = 10/12/14 vòng); [B] dùng q^en hằng số."""
+        cfg = self.config
+        n_i = max(float(block_length_bits if block_length_bits is not None else cfg.encryption_block_length_bits), 8.0)
+        factor = 1.0 + cfg.block_cipher_round_factor * np.log2(n_i / 8.0)
+        return cfg.block_cipher_cycles_per_bit * factor * data_size_bits / max(cfg.security_level, 1e-6)
 
-    # ==================== Energy ====================
+    def _dvfs_frequencies(self, C_enc: float, C_local: float, t_remote: float,
+                          tau: float, F_loc: float) -> Tuple[float, float]:
+        """
+        DVFS cho CPU xe user — [B] C4: 0 ≤ f^en, f^c ≤ F^loc; E = κ·C·f² ([B] Eq(11)).
+
+        min κ(C_en·f_en² + C_l·f_l²)  s.t.  C_en/f_en + C_l/f_l ≤ τ   (local sau mã hóa)
+                                            C_en/f_en + T_remote ≤ τ   (upload sau mã hóa)
+        KKT: không ràng buộc thứ hai → f_en = f_l = (C_en + C_l)/τ (tần số bằng nhau);
+        nếu mã hóa không kịp cho upload → f_en = C_en/(τ − T_remote), f_l = C_l/(τ − t_en).
+        Cắt vào [dvfs_min_fraction·F, F]; không khả thi → chạy F (vi phạm deadline được ghi nhận).
+        """
+        cfg = self.config
+        if not cfg.dvfs_enabled:
+            return F_loc, F_loc
+        f_min = cfg.dvfs_min_fraction * F_loc
+        clip = lambda f: float(min(max(f, f_min), F_loc))
+        budget = tau * (1.0 - 1e-6)   # tránh vượt deadline do làm tròn
+        if budget <= 0 or C_enc + C_local <= 0:
+            return F_loc, F_loc
+        f_en = f_l = (C_enc + C_local) / budget
+        if C_enc > 0 and t_remote > 0 and C_enc / f_en > budget - t_remote:
+            b_enc = budget - t_remote
+            f_en = C_enc / b_enc if b_enc > 0 else F_loc
+            f_en = clip(f_en)
+            rem = budget - C_enc / f_en
+            f_l = C_local / rem if (C_local > 0 and rem > 0) else F_loc
+        return clip(f_en), clip(f_l)
 
     def _compute_local_energy(self, user: User, task: Task) -> float:
         """E_local = κ·c·s·f_u². Ref: [A] Eq(12)."""
@@ -1056,18 +1169,17 @@ class VehicularEdgeEnvironment(gym.Env):
 
     def _price_urgency(self, tau_eff: float) -> float:
         """
-        ω = 1/τ_eff, chặn tại urgency_cap (MỞ RỘNG: [A] chỉ xét τ = 1 s; với
-        deadline động τ→0.05 s thì exp(1/τ) = e^20 làm giá phát nổ — T1.1).
+        ω = 1/(1 + τ_eff) ∈ (0, 1) — [A] §3.5 yêu cầu ω_m ∈ (0,1).
+        τ = 1 s → ω = 0.5 (giá trị [A] dùng trong mô phỏng); τ → 0 → ω → 1.
         """
-        return float(min(1.0 / max(tau_eff, self.config.deadline_floor),
-                         self.config.urgency_cap))
+        return float(1.0 / (1.0 + max(tau_eff, self.config.deadline_floor)))
 
     def _compute_mec_cost(self, mec: MECServer, task: Task, resource_level: int,
                           tau_eff: float) -> float:
         """
         g_j = b_j·exp(ω)·g_j0. Ref: [A] §3.5 (T0.7).
         T1.1: exp(ω) giờ có động lực học thật vì τ_eff động.
-        MỞ RỘNG: λ_res và chuẩn hóa giga-cycles (T0.7 bước 4); chặn ω (urgency_cap).
+        MỞ RỘNG: λ_res và chuẩn hóa giga-cycles (T0.7 bước 4).
         """
         omega = self._price_urgency(tau_eff)
         resource_multiplier = 1.0 + self.config.resource_multiplier_step * resource_level
@@ -1093,32 +1205,24 @@ class VehicularEdgeEnvironment(gym.Env):
 
     def _compute_reward(self, metrics: Dict[str, Any]) -> Tuple[float, Dict[str, float]]:
         """
-        T1.2 Phương án 1: min E[Σ(C_u − ϖ₁·U_u)] → r = −(C_u − ϖ₁·U_u) [cents]
-            C_u = λ^l·E_user + λ^n·E_AV + g_j + g_n     Ref: [A] Eq(22)
-            U_u — secure information capacity            Ref: [B] Eq(9), ϖ₁ [B] Table I
-        Ràng buộc: T ≤ τ_u ([A] 23e), E ≤ E_max ([B] C3, 0.4 J).
-            penalty_mode="fixed":    trừ λ_p·1[viol_T] + λ_pE·viol_E (tạm, T1.2 bước 4)
-            penalty_mode="external": KHÔNG trừ ở env — agent Lagrangian (T1.3)
-                tự cộng với multiplier học được.
-        Log riêng từng thành phần (T1.2 bước 5).
+        r = −C [cents], C = [A] Eq(22) (λ^n đúng nghĩa) + C_sec (rủi ro rò rỉ, [B] Eq(7)).
+        Ràng buộc: T ≤ τ_u ([A] 23e), E ≤ E_max ([B] C3).
+            penalty_mode="fixed":    trừ λ_p·1[viol_T] + λ_pE·viol_E
+            penalty_mode="external": env không trừ — agent Lagrangian (T1.3) tự cộng multiplier.
         """
         cfg = self.config
-        secure_term = cfg.varpi_1 * max(metrics["secure_capacity"], 0.0)
-        base = -(metrics["cost_total"] - secure_term)
-
         penalty = 0.0
         if cfg.penalty_mode == "fixed":
             if metrics["viol_T"]:
                 penalty += cfg.deadline_penalty
             penalty += cfg.energy_violation_penalty * metrics["viol_E"]
-
         components = {
             "cost_energy": metrics["cost_energy"],
             "cost_service": metrics["cost_service"],
-            "secure_term": secure_term,
+            "cost_security": metrics["cost_security"],
             "penalty": penalty,
         }
-        return float(base - penalty), components
+        return float(-metrics["cost_total"] - penalty), components
 
     # ==================== State ====================
 
@@ -1135,8 +1239,7 @@ class VehicularEdgeEnvironment(gym.Env):
             tau_eff, _ = self.effective_deadline(user, task)
             task_size_norm = min(task.size / self.config.task_size_max, 1.0)
             deadline_norm = min(tau_eff / max(self.config.task_deadline, 1e-6), 1.0)
-            omega = 1.0 / max(tau_eff, 0.1)
-            urgency_norm = min(omega / 10.0, 1.0)  # ω ∈ [1, 10] → [0.1, 1]
+            urgency_norm = self._price_urgency(tau_eff)  # ω ∈ (0, 1)
         else:
             task_size_norm, deadline_norm, urgency_norm = 0.0, 0.0, 0.0
 
@@ -1161,9 +1264,10 @@ class VehicularEdgeEnvironment(gym.Env):
             state_vector.append(min(rate / 1e7, 1.0))
         else:
             state_vector.append(0.0)
+        state_vector.append(min(self.attackers_in_range(user, self.config.security_range_v2v) / 3.0, 1.0))
 
         assert len(state_vector) == self.observation_space.shape[0], (
-            f"State dim không khớp công thức 4 + 2(J+N): "
+            f"State dim không khớp công thức 5 + 2(J+N): "
             f"{len(state_vector)} != {self.observation_space.shape[0]}")
         return np.array(state_vector, dtype=np.float32)
 
@@ -1217,7 +1321,13 @@ class VehicularEdgeEnvironment(gym.Env):
             "avg_cost": float(np.mean([t["cost_total"] for t in tasks])),
             "avg_cost_service": float(np.mean([t["cost_service"] for t in tasks])),
             "avg_cost_energy": float(np.mean([t["cost_energy"] for t in tasks])),
+            "avg_cost_security": float(np.mean([t["cost_security"] for t in tasks])),
             "avg_security_risk": float(np.mean([t["security_risk"] for t in tasks])),
+            "offload_ratio": float(np.mean([1.0 - t["alpha_l"] for t in tasks])),
+            "aux_share": float(np.mean([float("Aux_" in t["offload_location"]) for t in tasks])),
+            "mec_share": float(np.mean([float("MEC_" in t["offload_location"]) for t in tasks])),
+            "avg_block_length_aux": float(np.mean([t["block_length"] for t in tasks if t["block_length"] > 0]))
+                                    if any(t["block_length"] > 0 for t in tasks) else 0.0,
             "avg_secure_capacity": float(np.mean([t["secure_capacity"] for t in tasks])),
             "avg_tau_eff": float(np.mean([t["tau_eff"] for t in tasks])),
             "deadline_violation_rate": float(np.mean([float(t["viol_T"]) for t in tasks])),

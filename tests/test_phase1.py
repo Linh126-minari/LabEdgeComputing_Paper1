@@ -104,12 +104,11 @@ def test_reward_single_unit_and_components():
         action = env.action_space.sample()
         _, reward, terminated, truncated, info = env.step(action)
         comps = info["reward_components"]
-        expected = -(comps["cost_energy"] + comps["cost_service"]) \
-            + comps["secure_term"] - comps["penalty"]
+        expected = -(comps["cost_energy"] + comps["cost_service"] + comps["cost_security"]) - comps["penalty"]
         assert abs(reward - expected) < 1e-9
-        # cost = quy tiền năng lượng + giá dịch vụ (một đơn vị duy nhất)
-        assert abs(info["task_cost"] -
-                   (info["task_cost_energy"] + info["task_cost_service"])) < 1e-9
+        # cost = năng lượng quy tiền + giá dịch vụ + rủi ro rò rỉ (một đơn vị: cents)
+        assert abs(info["task_cost"] - (info["task_cost_energy"] + info["task_cost_service"]
+                                        + info["task_cost_security"])) < 1e-9
         if terminated or truncated:
             env.reset()
 
@@ -118,7 +117,7 @@ def test_energy_priced_via_lambda():
     """[A] Eq(22): năng lượng quy tiền qua λ^l = 1 cents/J (T1.2)."""
     env = make_env(background_users_enabled=False)
     for _ in range(50):
-        _, _, terminated, truncated, info = env.step(np.array([9, 0, 0]))  # all-local
+        _, _, terminated, truncated, info = env.step(env.make_action(9, 0, 0))  # all-local
         if info["offload_location"] == "local":
             # all-local: không phí dịch vụ, cost = λ^l · E_user
             assert info["task_cost_service"] == pytest.approx(0.0)
@@ -306,8 +305,8 @@ def test_action_mask_out_of_range():
     for aux in env.auxiliary_vehicles:
         aux.position = np.array([900.0, 900.0])
 
-    mask = env.action_mask().reshape(env.config.alpha_levels, 2, env.config.action_levels)
-    assert mask[-1].all(), "α_l = 1 phải luôn khả thi"
+    mask = env.action_mask().reshape(tuple(env.action_space.nvec))
+    assert mask[-1].any(), "α_l = 1 phải luôn khả thi"
     assert not mask[:-1].any(), "Nhánh remote phải bị mask khi ngoài tầm"
 
 
@@ -318,9 +317,11 @@ def test_action_mask_mec_in_coverage():
     for aux in env.auxiliary_vehicles:
         aux.position = user.position + np.array([500.0, 500.0])  # AUX ngoài tầm
 
-    mask = env.action_mask().reshape(env.config.alpha_levels, 2, env.config.action_levels)
-    assert mask[:, 0, :].all(), "MEC trong vùng phủ phải khả thi"
+    mask = env.action_mask().reshape(tuple(env.action_space.nvec))
+    assert mask[:, 0, :].any(axis=-1).all(), "MEC trong vùng phủ phải khả thi (mọi α, β)"
     assert not mask[:5, 1, :].any(), "AUX ngoài tầm phải bị mask"
+    # MEC dùng Paillier → N_i không có nghĩa → chỉ một N_i (mặc định) được mở
+    assert (mask[:-1, 0, :].sum(axis=-1) == 1).all()
 
 
 def test_masked_agent_never_selects_infeasible():
@@ -343,13 +344,13 @@ def test_masked_agent_never_selects_infeasible():
 def test_mask_flatten_order_matches_agent():
     """Thứ tự flatten của env.action_mask khớp np.ravel_multi_index của agent."""
     env = make_env()
-    L, R = env.config.alpha_levels, env.config.action_levels
-    mask3d = env.action_mask().reshape(L, 2, R)
+    nvec = tuple(env.action_space.nvec)
+    maskNd = env.action_mask().reshape(nvec)
     flat = env.action_mask()
     for _ in range(50):
-        a = (np.random.randint(L), np.random.randint(2), np.random.randint(R))
-        idx = np.ravel_multi_index(a, (L, 2, R))
-        assert flat[idx] == mask3d[a]
+        a = tuple(np.random.randint(n) for n in nvec)
+        idx = np.ravel_multi_index(a, nvec)
+        assert flat[idx] == maskNd[a]
 
 
 # =========================================================================

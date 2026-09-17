@@ -1,20 +1,46 @@
-# configs/data/riobus.yaml
-data_dir: "data/processed/data_train"
-output_parquet: "data/processed/riobus_corridor.parquet"
-output_csv: "data/processed/riobus_corridor.csv"
+# configs/data/riobus.yaml — Rio de Janeiro bus GPS (real, 25/01–21/03/2019)
+# Pipeline: scripts/preprocess_riobus.py (xem BAO_CAO_PHASE4_RIOBUS.md)
 
-# Preprocessing & Resampling parameters
-dt: 0.1                    # Time step in seconds (matches simulator)
-max_duration_seconds: 1000.0 # Maximum trajectory duration per vehicle (s)
-max_velocity_mps: 35.0     # Upper bound for valid bus speed (m/s, ~126 km/h)
-min_velocity_mps: 0.0      # Lower bound for valid bus speed (m/s)
-sim_area_x: 1000.0         # Simulator area bounds x (meters)
-sim_area_y: 1000.0         # Simulator area bounds y (meters)
+raw_dir: "data/unstructured/individual_bus_lines_data"   # Spark output: bus_line_*/part-*.csv
+out_dir: "data/processed/riobus"
+compat_csv: "data/processed/riobus_corridor.csv"          # 1 cửa sổ, cho test/sim2real_study cũ
 
-# Selection filters
-max_vehicles: 10           # Number of vehicles to preprocess and include in corridor
-selected_lines:            # Target bus lines to filter
-  - "298"
-  - "315"
-  - "415"
-  - "550"
+# ---- 1. Làm sạch ----
+bbox: {lat_min: -23.10, lat_max: -22.70, lon_min: -43.80, lon_max: -43.10}
+max_recorded_speed_kmh: 120.0   # cột speed > ngưỡng → coi là lỗi, bỏ điểm
+max_implied_speed_kmh: 120.0    # vận tốc suy ra từ 2 điểm liên tiếp > ngưỡng → nhảy GPS
+max_trip_gap_s: 180.0           # khoảng trống > ngưỡng → tách chuyến
+min_trip_points: 5
+exclude_dates:                  # Carnaval Rio 2019 (02–06/03) — giao thông bất thường
+  - "2019-03-02"
+  - "2019-03-03"
+  - "2019-03-04"
+  - "2019-03-05"
+  - "2019-03-06"
+
+# ---- 2. Vùng thí nghiệm (hotspot) ----
+hotspot_center: null            # [lat, lon] để cố định; null → tự tìm ô lưới đông xe buýt nhất
+hotspot_grid_m: 1000.0
+hotspot_hours: [7, 8, 17, 18]   # giờ cao điểm dùng để tìm hotspot (ngày thường)
+anchor_xy: [250.0, 250.0]       # hotspot center ↦ vị trí MEC #0 trong simulator (0.25·sim_area)
+sim_area: [1000.0, 1000.0]
+keep_radius_m: 1000.0           # đoạn quỹ đạo phải đi vào trong bán kính này quanh hotspot
+clip_radius_m: 1500.0           # bỏ phần quỹ đạo ngoài bán kính này (vùng mô phỏng 1 km², MEC L=300 m)
+
+# ---- 3. Cửa sổ thời gian (đồng bộ đồng hồ mọi xe → giữ quan hệ không gian V2V thật) ----
+window_start_hours: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+window_duration_s: 1800.0   # ≥ thời lượng 1 episode (~1700 s mô phỏng cho 1000 quyết định)
+out_dt: 1.0                     # bước lưu; TraceMobility nội suy tiếp tới dt mô phỏng (0.1 s)
+max_interp_gap_s: 180.0         # không nội suy qua khoảng trống > ngưỡng (p90 lấy mẫu ≈ 150 s)
+min_segment_s: 60.0             # bỏ đoạn quỹ đạo ngắn hơn
+num_slots: 15                   # = num_users + num_aux + num_attack mặc định (10+3+2)
+min_window_coverage: 0.8        # tỉ lệ thời gian trung bình các slot có xe thật
+weekdays_only: true
+
+# ---- 4. Chia train/test theo ngày (không rò rỉ thời gian) ----
+train_dates: ["2019-01-25", "2019-02-28"]
+test_dates:  ["2019-03-07", "2019-03-21"]
+
+# ---- 5. Thống kê ----
+mec_radius_m: 300.0             # L = 300 m [A]
+neighbor_radii_m: [150.0, 200.0, 300.0]

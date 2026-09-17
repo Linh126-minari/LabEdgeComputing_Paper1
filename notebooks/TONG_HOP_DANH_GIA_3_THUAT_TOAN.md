@@ -1,5 +1,7 @@
 # Tổng hợp Đánh giá & Kết quả Thực nghiệm 3 Thuật toán (LagrangianDQN, DuelingDQN, MADDPG)
 
+> ⚠️ **16/09/2026 — KẾT QUẢ DƯỚI ĐÂY KHÔNG HỢP LỆ.** "MADDPG" không có cài đặt riêng (là Dueling Double DQN); reward của LagrangianDQN chưa trừ penalty còn baseline đã trừ (λ_p = 5, không phải 100) nên con số +80.7% sai; viol_E ≈ 100% do ràng buộc năng lượng không khả thi; mọi mô hình train trên mobility synthetic. Xem `BAO_CAO_HUAN_LUYEN_LAI.md`.
+
 **Ngày lập:** 08/08/2026  
 **Dự án:** CSO-Sim-Framework (Computation & Security Optimization Simulator Framework)  
 **Nhà nghiên cứu / Thực thi:** AI Pair Programming Assistant & User
