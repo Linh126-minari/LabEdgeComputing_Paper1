@@ -37,11 +37,16 @@ hyperparameters:
   alpha_levels: 10
   action_levels: 10
 
-  # --- Lagrangian (T1.3) ---
+  # --- Lagrangian & PID (T1.3 & Stooke et al., ICML 2020) ---
+  use_pid: true             # Bật PID-Lagrangian (Stooke et al., ICML 2020)
+  pid_kp: 0.1               # Proportional gain (phản ứng tức thời)
+  pid_ki: 0.05              # Integral gain
+  pid_kd: 0.02              # Derivative gain (giảm chấn, chống dao động)
   lambda_T_init: 1.0        # multiplier deadline khởi tạo
   lambda_E_init: 1.0        # multiplier energy khởi tạo
-  lambda_lr: 0.05           # lr_λ << lr_policy (dual ascent chậm hơn policy)
+  lambda_lr: 0.05           # fallback lr_λ
   lambda_max: 100.0
   delta_T: 0.05             # chấp nhận 5% vi phạm deadline
   delta_E: 0.0              # không chấp nhận vượt E_max trung bình
-  multiplier_update_interval: 10   # K — cập nhật mỗi K episode
+  multiplier_update_interval: 1   # PID cập nhật mỗi episode (thay vì K=10)
+

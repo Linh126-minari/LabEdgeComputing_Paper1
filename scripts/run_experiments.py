@@ -45,13 +45,14 @@ def estimate(agent, domain, episodes, eval_interval, eval_episodes, train_freq, 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--agents", nargs="+", default=["lagrangian_dqn", "dueling_dqn", "maddpg"])
+    ap.add_argument("--agents", nargs="+", default=["lagrangian_dqn", "dueling_dqn"],
+                    help="Danh sách thuật toán huấn luyện (mặc định: lagrangian_dqn và dueling_dqn)")
     ap.add_argument("--domains", nargs="+", default=["synthetic", "real"], choices=list(DOMAINS))
     ap.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2])
-    ap.add_argument("--episodes", type=int, default=500)
+    ap.add_argument("--episodes", type=int, default=200)
     ap.add_argument("--eval-interval", type=int, default=25)
     ap.add_argument("--eval-episodes", type=int, default=3)
-    ap.add_argument("--maddpg-train-freq", type=int, default=1)
+    ap.add_argument("--maddpg-train-freq", type=int, default=4)
     # mỗi run trace ~0.6 GB RAM riêng (+ thư viện torch dùng chung) → mặc định tối đa 8 tiến trình
     ap.add_argument("--jobs", type=int, default=max(1, min(8, (os.cpu_count() or 2) - 2)))
     ap.add_argument("--out-root", default="outputs/runs")

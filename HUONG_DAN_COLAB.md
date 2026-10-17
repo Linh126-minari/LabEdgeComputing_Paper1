@@ -49,65 +49,57 @@ DRIVE = '/content/drive/MyDrive/vec_paper1'
 ```
 
 ```python
-# (4) Chạy thử 1 seed để chọn số episode (xem ước lượng trước bằng --dry-run)
+# (4) Chạy thử 1 seed để kiểm tra hội tụ (xem ước lượng trước bằng --dry-run)
 RUNS = f'{DRIVE}/runs'
-!python scripts/run_experiments.py --dry-run --seeds 0 --episodes 200 --maddpg-train-freq 4 --jobs 2 --speed-factor 1.8 --out-root {RUNS}
-!nohup python scripts/run_experiments.py --seeds 0 --episodes 200 --maddpg-train-freq 4 --jobs 2 --out-root {RUNS} > {DRIVE}/launcher_seed0.log 2>&1 &
+!python scripts/run_experiments.py --dry-run --agents lagrangian_dqn dueling_dqn --seeds 0 --episodes 150 --jobs 2 --speed-factor 1.8 --out-root {RUNS}
+!nohup python scripts/run_experiments.py --agents lagrangian_dqn dueling_dqn --seeds 0 --episodes 150 --jobs 2 --out-root {RUNS} > {DRIVE}/launcher_seed0.log 2>&1 &
 ```
 
 ```python
 # Theo dõi tiến độ (chạy lại ô này bất cứ lúc nào)
 !tail -n 20 {DRIVE}/launcher_seed0.log
-!ls {RUNS}/*/*/seed0/agent_model.pth 2>/dev/null | wc -l     # 6 = xong
+!ls {RUNS}/*/*/seed0/agent_model.pth 2>/dev/null | wc -l     # 4 = xong (2 thuật toán x 2 miền)
 !tail -n 3 {RUNS}/lagrangian_dqn/real/seed0/train.log
 ```
 
 ```python
-# (5) Đường hội tụ → chọn số episode
-!python scripts/plot_convergence.py --runs-dir {RUNS} --out {DRIVE}/convergence_seed0.png
-from IPython.display import Image; Image(f'{DRIVE}/convergence_seed0.png')
-```
-
-Nếu `objective` và `viol_T` đã phẳng từ khoảng episode 120–150 thì giữ 200 episode. Nếu vẫn còn giảm ở episode 200:
-- chạy lại với `--episodes 300` (hoặc hơn);
-- **đổi `--out-root`** sang thư mục mới, vì launcher bỏ qua run đã có model mà không kiểm tra số episode.
-
-```python
-# (6) Đủ 3 seed — seed 0 đã xong sẽ được bỏ qua (giữ nguyên --episodes và --out-root)
-!nohup python scripts/run_experiments.py --seeds 0 1 2 --episodes 200 --maddpg-train-freq 4 --jobs 2 --out-root {RUNS} > {DRIVE}/launcher_all.log 2>&1 &
+# (5) Đủ 3 seed — seed 0 đã xong sẽ được bỏ qua (giữ nguyên --episodes và --out-root)
+!nohup python scripts/run_experiments.py --agents lagrangian_dqn dueling_dqn --seeds 0 1 2 --episodes 150 --jobs 2 --out-root {RUNS} > {DRIVE}/launcher_all.log 2>&1 &
 ```
 
 ```python
-# (7) Đánh giá chung trên synthetic và Rio-test (ngày khác tập train) từ model đã lưu — không train lại
-for a in ['lagrangian_dqn', 'dueling_dqn', 'maddpg']:
-    !python scripts/sim2real_study.py --runs-dir {RUNS} --agent {a} --seeds 0 1 2 --eval-episodes 10 --output_dir {DRIVE}/eval 2>&1 | grep -A8 "Transfer matrix"
+# (6) Đánh giá chung (synthetic và Rio test) từ model đã lưu — không train lại
+EVAL = f'{DRIVE}/eval'
+for a in ['lagrangian_dqn', 'dueling_dqn']:
+    !python scripts/sim2real_study.py --runs-dir {RUNS} --agent {a} --seeds 0 1 2 --eval-episodes 10 --output_dir {EVAL} 2>&1 | grep -A8 "Transfer matrix"
 ```
 
-Kết quả nằm trong `{DRIVE}/eval/`:
-- `transfer_matrix_<agent>.csv`: trung bình ± CI95 theo seed, gồm objective (cents/task), viol_T, viol_E, offload_ratio, aux_share, mec_share, block_length_aux, cost_security;
-- `transfer_raw_<agent>.csv`: số liệu thô từng episode;
-- `distribution_gap.csv`: KS vận tốc và thời gian lưu trú.
+```python
+# (7) Xuất toàn bộ biểu đồ so sánh chuẩn bài báo khoa học (DPI 300)
+PLOTS = f'{DRIVE}/plots'
+!python scripts/plot_comparison.py --runs-dir {RUNS} --eval-dir {EVAL} --out-dir {PLOTS}
+```
 
-**So sánh các thuật toán bằng `objective_cents` + `viol_T` + `viol_E`, không dùng `total_reward` trong log train.** Reward huấn luyện của LagrangianDQN không trừ penalty, còn baseline thì có.
+Kết quả biểu đồ nằm trong `{DRIVE}/plots/`:
+- `fig1_convergence_comparison.png`: Tốc độ hội tụ Objective & Vi phạm ràng buộc (Synthetic vs Rio).
+- `fig2_pid_multiplier_dynamics.png`: Động thái nhân tử PID $\lambda_T, \lambda_E$ (chứng minh dập tắt dao động và chống vọt lố).
+- `fig3_sim2real_transfer.png`: Biểu đồ cột ma trận chuyển giao Sim-to-Real giữa 2 thuật toán.
 
-## 3. Thời gian dự kiến
+## 3. Thời gian dự kiến (Đã lược bỏ MADDPG)
 
-Đo trên máy lab rồi nhân 1.8 cho CPU Colab. Đây là ước lượng; con số thật in ra ở `--dry-run`.
-
-| Cấu hình (2 tiến trình) | Ước lượng |
+| Cấu hình (2 tiến trình Colab) | Ước lượng |
 |---|---|
-| 1 seed × 3 thuật toán × 2 miền, 200 episode, MADDPG `train_freq=4` | **~2 h** |
-| 3 seed, 200 episode, `train_freq=4` | ~6 h |
-| 3 seed, chỉ miền Rio (`--domains real`) | ~3.8 h |
-| 3 seed, 500 episode, `train_freq=4` | ~15 h |
-| 3 seed, 500 episode, MADDPG `train_freq=1` | ~26 h |
+| 1 seed × 2 thuật toán × 2 miền, 150 episode | **~45 phút** |
+| 3 seed, 150 episode (toàn bộ lưới 12 runs) | **~2.2 giờ** |
+| Đánh giá Sim-to-Real (2 thuật toán) | ~5 phút |
+| Vẽ toàn bộ biểu đồ | ~30 giây |
 
 ## 4. Mẹo với Colab
 
-- **Phiên bị ngắt** (tối đa ~12 h, hoặc ~90 phút nếu không tương tác): chạy lại ô (2), sau đó chạy lại lệnh launcher y hệt. Run đã xong sẽ được bỏ qua; run đang dở sẽ train lại từ đầu, vì chưa có checkpoint giữa chừng.
-- **Chạy song song nhiều phiên** (nhiều tài khoản hoặc nhiều notebook): chia theo thuật toán, dùng chung `--out-root` trên cùng Drive.
-  - Phiên A: `--agents lagrangian_dqn`
-  - Phiên B: `--agents dueling_dqn`
+- **Phiên bị ngắt**: Chạy lại ô mount Drive và clone code, sau đó chạy lại lệnh launcher y hệt. Run đã xong (`agent_model.pth`) sẽ được tự động bỏ qua; run dở dang sẽ tiếp tục.
+- **Chia phiên nếu muốn nhanh hơn nữa**:
+  - Phiên 1: `--agents lagrangian_dqn` (~1.1 giờ)
+  - Phiên 2: `--agents dueling_dqn` (~1.1 giờ)
   - Phiên C: `--agents maddpg`
 - **Không đặt `--jobs` lớn hơn số core** (`!nproc`): các tiến trình sẽ tranh CPU và chậm hơn.
 - RAM: mỗi run trên dữ liệu Rio dùng ~0.6 GB; 2 tiến trình vừa sức 12 GB của Colab.

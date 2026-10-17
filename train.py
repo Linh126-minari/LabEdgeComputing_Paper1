@@ -184,7 +184,11 @@ def build_agent(cfg: DictConfig, env: VehicularEdgeEnvironment, env_config: Envi
             lambda_max=hp.get("lambda_max", 100.0),
             delta_T=hp.get("delta_T", 0.05),
             delta_E=hp.get("delta_E", 0.0),
-            multiplier_update_interval=hp.get("multiplier_update_interval", 10),
+            multiplier_update_interval=hp.get("multiplier_update_interval", 1),
+            use_pid=hp.get("use_pid", True),
+            pid_kp=hp.get("pid_kp", 0.1),
+            pid_ki=hp.get("pid_ki", None),
+            pid_kd=hp.get("pid_kd", 0.02),
         )
     else:
         agent = DRLAgent(**common_kwargs)
