@@ -126,7 +126,9 @@ def main():
     ap.add_argument("--output_dir", default="outputs/sim2real")
     ap.add_argument("--runs-dir", default=None, help="thư mục của run_experiments.py → nạp model thay vì train")
     args = ap.parse_args()
-    out_dir = ROOT / args.output_dir
+    out_dir = Path(args.output_dir)
+    if not out_dir.is_absolute():
+        out_dir = ROOT / out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
     gap = distribution_gap(ROOT / "data/processed/riobus/riobus_stats.json",
@@ -145,7 +147,10 @@ def main():
             cfg = compose_cfg(tr_over + common + [f"general.random_seed={seed}",
                                                   f"general.project_name=sim2real/{args.agent}/{train_dom}_seed{seed}"])
             if args.runs_dir:
-                model = ROOT / args.runs_dir / args.agent / train_dom / f"seed{seed}" / "agent_model.pth"
+                rdir = Path(args.runs_dir)
+                if not rdir.is_absolute():
+                    rdir = ROOT / rdir
+                model = rdir / args.agent / train_dom / f"seed{seed}" / "agent_model.pth"
                 if not model.exists():
                     logger.warning(f"Thiếu {model} — bỏ qua")
                     continue

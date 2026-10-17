@@ -19,6 +19,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 ROOT = Path(__file__).resolve().parents[1]
 DOMAINS = {
     "synthetic": ["env=scenario_default"],
@@ -61,16 +66,22 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    root = ROOT / args.out_root
+    root = Path(args.out_root)
+    if not root.is_absolute():
+        root = ROOT / root
     jobs = []
     for agent, domain, seed in itertools.product(args.agents, args.domains, args.seeds):
         d = run_dir(root, agent, domain, seed)
         est = estimate(agent, domain, args.episodes, args.eval_interval, args.eval_episodes, args.maddpg_train_freq,
                        args.speed_factor)
+        try:
+            proj_name = str(d.relative_to(ROOT / "outputs"))
+        except ValueError:
+            proj_name = str(d)
         cmd = [sys.executable, "train.py", f"agent={agent}", *DOMAINS[domain],
                f"general.random_seed={seed}", f"general.num_episodes={args.episodes}", "general.device=cpu",
                f"general.eval_interval={args.eval_interval}", f"general.eval_episodes={args.eval_episodes}",
-               f"general.project_name={d.relative_to(ROOT / 'outputs')}", f"hydra.run.dir={d}/hydra", *args.extra]
+               f"general.project_name={proj_name}", f"hydra.run.dir={d}/hydra", *args.extra]
         if agent == "maddpg":
             cmd.append(f"agent.hyperparameters.train_freq={args.maddpg_train_freq}")
         done = (d / "agent_model.pth").exists()
@@ -94,7 +105,7 @@ def main():
     def run(j):
         j["dir"].mkdir(parents=True, exist_ok=True)
         t = time.time()
-        with open(j["dir"] / "train.log", "w") as log:
+        with open(j["dir"] / "train.log", "w", encoding="utf-8", errors="replace") as log:
             rc = subprocess.run(j["cmd"], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT).returncode
         return j, rc, time.time() - t
 

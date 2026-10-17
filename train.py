@@ -208,7 +208,8 @@ def train(cfg: DictConfig):
     logger.info(f"Config:\n{OmegaConf.to_yaml(cfg)}")
     
     # ==================== Setup ====================
-    output_dir = Path(cfg.paths.logs) / cfg.general.project_name
+    proj = Path(cfg.general.project_name)
+    output_dir = proj if proj.is_absolute() else Path(cfg.paths.logs) / proj
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Set random seed (numpy + torch để các seed tái lập được)

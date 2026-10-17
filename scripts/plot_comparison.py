@@ -238,10 +238,18 @@ def main():
     ap.add_argument("--window", type=int, default=10, help="Cửa sổ trung bình trượt")
     args = ap.parse_args()
 
-    out_dir = ROOT / args.out_dir
+    out_dir = Path(args.out_dir)
+    if not out_dir.is_absolute():
+        out_dir = ROOT / out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
-    runs_dir = ROOT / args.runs_dir
-    eval_dir = ROOT / args.eval_dir
+
+    runs_dir = Path(args.runs_dir)
+    if not runs_dir.is_absolute():
+        runs_dir = ROOT / runs_dir
+
+    eval_dir = Path(args.eval_dir)
+    if not eval_dir.is_absolute():
+        eval_dir = ROOT / eval_dir
 
     print("=" * 70)
     print("VẼ TỔNG HỢP BIỂU ĐỒ BÁO CÁO KHOA HỌC")
