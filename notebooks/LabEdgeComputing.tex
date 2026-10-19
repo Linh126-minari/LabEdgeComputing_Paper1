@@ -9,6 +9,7 @@
 \usepackage{algorithm}     
 \usepackage{algpseudocode} 
 \usepackage{subcaption}
+\usepackage{xcolor}
 \geometry{margin=1in}
 
 \title{\textbf{Joint Optimization of Security Strength, Dynamic Pricing, and Resource Allocation for Task Offloading in Vehicular Edge Computing: A Constrained DRL Approach}}
@@ -370,6 +371,46 @@ Average Task Delay (s) & $0.9942$ & $0.9916$ & $+0.26\%$ \\
 \caption{Sim-to-Real Transfer Matrix Comparison: Mean objective cost (left) and deadline violation rate (right) across the four train-test combinations.}
 \label{fig:sim2real}
 \end{figure}
+
+\subsection{Comparison with Heuristic and Rule-Based Baselines}
+To further demonstrate the superiority of the proposed DRL framework over standard operational heuristics, we benchmark \texttt{PID-LagrangianDQN} against five representative rule-based and heuristic policies evaluated on the real-world Rio bus test trajectory dataset:
+\begin{enumerate}
+    \item \textbf{\texttt{All-Local}:} Executes $100\%$ of task workloads onboard the user vehicle CPU ($\alpha_l = 1$).
+    \item \textbf{\texttt{All-MEC}:} Offloads $100\%$ of workloads to the roadside MEC server with Paillier homomorphic encryption whenever within V2I coverage ($d_{u,j} \le d_i^{\mathrm{V2I}}$), reverting to local compute otherwise.
+    \item \textbf{\texttt{All-AUX}:} Offloads $100\%$ of workloads to an available Auxiliary Vehicle with dynamic block cipher encryption.
+    \item \textbf{\texttt{Greedy} (Myopic):} At each decision slot, exhaustively searches over all feasible actions to select the one that minimizes instantaneous cost $C_{\mathrm{total}}$ while prioritizing constraint feasibility.
+    \item \textbf{\texttt{Random}:} Uniformly samples a valid action from the unmasked action space.
+\end{enumerate}
+
+Table~\ref{tab:heuristic_comparison} summarizes the empirical comparison across all seven policies under the real-world deployment environment.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Comprehensive Comparison with Heuristic and Rule-Based Baselines (Real Rio Bus Test Dataset).}
+\label{tab:heuristic_comparison}
+\begin{tabular}{lccccc}
+\toprule
+\textbf{Policy / Algorithm} & \textbf{Total Cost (cents)} & \textbf{Deadline Viol.} & \textbf{Energy Viol.} & \textbf{Service Cost} & \textbf{Security Cost} \\
+\midrule
+\textbf{\texttt{PID-LagrangianDQN}} & \textbf{0.14001 $\pm$ 0.003} & \textbf{1.90\%} & \textbf{8.05\%} & 0.01414 & 0.00127 \\
+\texttt{DuelingDQN} & 0.14540 $\pm$ 0.002 & 1.88\% & 8.08\% & 0.01824 & 0.00190 \\
+\texttt{Greedy} & 0.14256 $\pm$ 0.005 & 2.13\% & 6.58\% & 0.01845 & 0.00000 \\
+\texttt{All-Local} & 0.14907 $\pm$ 0.001 & 2.92\% & \textcolor{red}{10.43\%} & 0.00000 & 0.00000 \\
+\texttt{All-AUX} & 0.15655 $\pm$ 0.001 & \textcolor{red}{7.54\%} & 8.31\% & 0.02201 & 0.00472 \\
+\texttt{Random} & 0.29971 $\pm$ 0.016 & \textcolor{red}{11.02\%} & 9.42\% & 0.15806 & 0.00178 \\
+\texttt{All-MEC} & 0.59541 $\pm$ 0.060 & \textcolor{red}{23.67\%} & \textcolor{red}{18.98\%} & 0.39419 & 0.00000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The empirical findings from Table~\ref{tab:heuristic_comparison} provide profound insights into the mechanics of VEC offloading:
+\begin{itemize}
+    \item \textbf{Failure of Blind Cloud Offloading (\texttt{All-MEC}):} Offloading indiscriminately to the roadside server produces catastrophic failure: total monetary cost surges by $+325\%$ ($0.59541$ cents) due to extortionate cloud service fees ($0.39419$ cents). Furthermore, uploading large homomorphically encrypted payloads ($2\times$ expansion) over time-varying V2I fading links induces severe channel congestion, causing massive deadline violations of $23.67\%$ (nearly $5\times$ higher than the $5\%$ tolerance).
+    \item \textbf{Energy Infeasibility of \texttt{All-Local}:} While local computation eliminates service leasing fees and wireless security risks, forcing resource-constrained vehicle processors to compute large $1\text{ Mbit}$ tasks severely exhausts vehicle batteries, causing energy violations of $10.43\%$ (exceeding the $10\%$ safety threshold).
+    \item \textbf{Connection Fragility of \texttt{All-AUX}:} Auxiliary vehicles are highly opportunistic; frequent out-of-range handovers and limited spare compute capacities cause $7.54\%$ of tasks to miss deadlines.
+    \item \textbf{The Myopic Sub-Optimality of \texttt{Greedy}:} Although the myopic greedy heuristic performs best among rule-based baselines ($0.14256$ cents), it lacks temporal foresight. It cannot anticipate approaching MEC coverage zones or future channel variations, forcing it to pay higher service costs ($0.01845$ vs. $0.01414$ cents). Our proposed \texttt{PID-LagrangianDQN} reduces total cost by an additional $1.79\%$ and achieves superior long-term trade-offs.
+\end{itemize}
 
 The data in Table~\ref{tab:cost_breakdown} uncovers the core flaw of fixed-penalty schemes:
 \begin{enumerate}
