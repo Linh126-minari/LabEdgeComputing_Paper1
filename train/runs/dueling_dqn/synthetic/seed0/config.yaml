@@ -1,0 +1,455 @@
+num_users:
+  value: 10
+  unit: vehicles
+  source: '[A] Fig.3'
+  note: U=10 user vehicles (chốt theo [A], sửa .tex từ 5 -> 10)
+num_mec_servers:
+  value: 1
+  unit: servers
+  source: '[A] Fig.3'
+  note: J=1 MEC server (chốt theo [A], sửa .tex từ 2 -> 1)
+num_auxiliary_vehicles:
+  value: 3
+  unit: vehicles
+  source: '[A] Fig.3'
+  note: N=3 auxiliary vehicles
+num_attack_vehicles:
+  value: 11
+  unit: vehicles
+  source: Calibrated to [B] Eq(8) (scripts/calibrate_energy.py)
+  note: 'Attacker vật lý (attacker_model=realized): 11 xe/1 km² → E[n^e] trong bán
+    kính 150 m ≈ 0.785 = kỳ vọng [B] Eq(8). n^e thay đổi theo state nên N_i tối ưu
+    thay đổi. Trong kịch bản trace, attacker vẫn synthetic (dữ liệu Rio chỉ có xe
+    buýt).'
+sim_area_x:
+  value: 1000.0
+  unit: m
+  source: Extension (not in [A]/[B])
+  note: Kích thước vùng mô phỏng
+sim_area_y:
+  value: 1000.0
+  unit: m
+  source: Extension (not in [A]/[B])
+  note: Kích thước vùng mô phỏng
+velocity_min:
+  value: 2.0
+  unit: m/s
+  source: '[B] Table I'
+  note: Vận tốc synthetic ~ Gauss cắt cụt [B] Eq(1) trên [v_min, v_max]
+velocity_max:
+  value: 24.0
+  unit: m/s
+  source: '[B] Table I'
+  note: Cận trên Gauss cắt cụt [B] Eq(1)
+velocity_mean:
+  value: 13.0
+  unit: m/s
+  source: '[B] Table I'
+  note: mu — gần dữ liệu Rio thật (4.4 m/s) hơn U(15,25) của [A]
+velocity_std:
+  value: 5.0
+  unit: m/s
+  source: '[B] Table I'
+  note: sigma
+lane_count:
+  value: 8
+  unit: lanes
+  source: '[B] Table I'
+  note: 'N_l = 8 làn (quyết định 26/07/2026: theo [B] để nhất quán bộ tham số bảo
+    mật; scenario cũ dùng 3)'
+road_max_speed:
+  value: 24.0
+  unit: m/s
+  source: '[B] Table I'
+  note: v_max trong gamma = N_l/(3 v_max) của [B] Eq(8). gamma = 8/72
+task_size_min:
+  value: 102400
+  unit: bits (=100 kbit)
+  source: '[A] Section 6'
+  note: '''the task size is between 100 kb and 1000 kb'' — kilobit. [B] dùng [100,900]
+    KB (kilobyte) — nếu chạy theo [B] thì làm scenario riêng'
+task_size_max:
+  value: 1024000
+  unit: bits (=1000 kbit)
+  source: '[A] Section 6'
+  note: Xem task_size_min
+task_cycles_per_bit:
+  value: 1000
+  unit: cycles/bit
+  source: '[A] Section 6'
+  note: c_m = 1000 cycles/bit
+task_deadline_app:
+  value: 1.0
+  unit: s
+  source: '[A] Section 6'
+  note: Deadline ứng dụng tau_app. Từ T1.1 deadline hiệu dụng = min(tau_app, thời
+    gian lưu trú)
+task_arrival_rate:
+  value: 0.5
+  unit: tasks/s
+  source: '[A] Section 6'
+  note: Poisson arrival (chốt Poisson theo [A], sửa .tex khỏi Bernoulli)
+mec_cpu_frequency:
+  value: 3000000000.0
+  unit: Hz
+  source: '[B] Table I (F^e)'
+  note: '[A] dùng 1 GHz nhưng khi ghép với xe 2 GHz thì edge chậm hơn xe → không có
+    đánh đổi offload (DANH_GIA_KIEN_TRUC §3.3)'
+aux_cpu_frequency:
+  value: 2000000000.0
+  unit: Hz
+  source: Calibrated (scripts/calibrate_energy.py)
+  note: '[A] 0.5 GHz. Chọn 2 GHz > F^loc xe để AUX là lựa chọn có ý nghĩa'
+user_cpu_frequency:
+  value: 1000000000.0
+  unit: Hz
+  source: Calibrated; [A] 0.5 GHz, [B] F^loc = 2 GHz
+  note: F^loc — tần số TỐI ĐA; tần số thực chọn bằng DVFS ([B] C4)
+kappa_effective_capacitance:
+  value: 5.0e-28
+  unit: W s^3 / cycles^3
+  source: Calibrated (scripts/calibrate_energy.py); [B] Table I uses 1e-27
+  note: 'Với 1e-27: 26% state không có action thỏa E_max. 5e-28 + DVFS: 93% khả thi,
+    offload là tối ưu ở 43% state có thể offload'
+bandwidth_mec:
+  value: 1000000.0
+  unit: Hz
+  source: '[A] Section 6'
+  note: B = 1 MHz cho uplink V2I
+bandwidth_v2v:
+  value: 800000.0
+  unit: Hz
+  source: '[A] Section 6'
+  note: B_V2V = 0.8 MHz
+noise_power:
+  value: 3.0e-13
+  unit: W
+  source: '[A] Section 6'
+  note: W0 = 3e-13 W
+tx_power:
+  value: 0.2
+  unit: W
+  source: '[A] Section 6'
+  note: p_m = 0.2 W công suất phát của user vehicle
+idle_power:
+  value: 0.05
+  unit: W
+  source: '[A] Section 6'
+  note: p_w = 0.05 W — 'the idle power is 0.05 W'. Dùng cho E^w (T0.6)
+path_loss_exponent:
+  value: 4
+  unit: '-'
+  source: '[A] Section 6'
+  note: theta = 4
+channel_ref_distance:
+  value: 1.0
+  unit: m
+  source: Extension (not in [A]/[B])
+  note: d0 — [A] KHÔNG định nghĩa khoảng cách tham chiếu cho delta_0, khiến bộ tham
+    số gốc cho SNR ~ 0 ở d >= 100 m. Ta khai báo tường minh d0 = 1 m (T0.5)
+channel_ref_gain:
+  value: 0.0475
+  unit: '- (path gain at d0)'
+  source: Extension (recalibrated from [A])
+  note: delta_0 hiệu chỉnh bằng scripts/calibrate_channel.py sao cho SNR(100m) ~ 25
+    dB, SNR(300m) ~ 6 dB, rate(100m, B=1MHz) ~ 8 Mbps. Giá trị gốc 1e-13 của [A] không
+    nhất quán đơn vị (T0.5)
+mec_coverage_radius:
+  value: 300.0
+  unit: m
+  source: '[A] Section 6'
+  note: L = 300 m bán kính phủ sóng RSU/MEC
+curb_distance:
+  value: 20.0
+  unit: m
+  source: Extension (not in [A]/[B])
+  note: z trong [A] Eq(6) — khoảng cách RSU tới lề đường; [A] không cho giá trị số
+    (T1.1)
+security_range_v2i:
+  value: 200.0
+  unit: m
+  source: Extension (calibrated, T1.7)
+  note: 'd_i ([B] Eq(8)) cho liên kết V2I — bán kính vùng phát của xe gửi. Hiệu chỉnh
+    T1.7: n^e = 1.34, p_att = 0.61 (vùng không suy biến của Eq(39))'
+security_range_v2v:
+  value: 150.0
+  unit: m
+  source: Extension (calibrated, T1.7)
+  note: 'd_i cho liên kết V2V. Hiệu chỉnh T1.7: n^e = 0.75, p_att = 0.41 — nằm trong
+    vùng có nghĩa [0.52, 0.84] của nghiệm đóng [B] Eq(39). Xem scripts/calibrate_security.py'
+deadline_floor:
+  value: 0.05
+  unit: s
+  source: Extension (not in [A]/[B])
+  note: Sàn của deadline hiệu dụng tau_eff (T1.1) để tránh chia 0 khi xe sắp rời vùng
+    phủ
+v2v_range:
+  value: 200.0
+  unit: m
+  source: Extension (not in [A]/[B])
+  note: Tầm liên kết V2V; đồng thời là bán kính vùng phát d_i của người gửi trong
+    [B] Eq(8) cho nhánh V2V
+mec_bandwidth_pool:
+  value: 10000000.0
+  unit: bit/s
+  source: Extension (not in [A]/[B])
+  note: Tổng băng thông khả dụng tại MEC cho cấp phát tài nguyên
+aux_bandwidth_pool:
+  value: 5000000.0
+  unit: bit/s
+  source: Extension (not in [A]/[B])
+  note: Tổng băng thông khả dụng tại AUX
+homomorphic_key_length:
+  value: 1024
+  unit: bits
+  source: '[A] Section 3.3'
+  note: Độ dài khóa Paillier. KHÔNG được dùng làm block length trong công thức của
+    [B] (lỗi cũ N_i=2048 đến từ đây)
+homomorphic_cycles_per_bit:
+  value: 800
+  unit: cycles/bit
+  source: '[A] Section 6'
+  note: c^en — Paillier HE, CHỈ dùng cho nhánh MEC (server không tin cậy). Ciphertext
+    phồng 2x khi upload.
+block_cipher_frame_length:
+  value: 64
+  unit: bits
+  source: '[B] Table I'
+  note: 'N_f = 64 — maximum block length của mã khối đối xứng. Lỗi cũ: 8192'
+block_cipher_block_length:
+  value: 32
+  unit: bits
+  source: Extension (decision variable, valid range (0, N_f])
+  note: 'N_i — block length thực dùng; [B] coi là biến tối ưu. Đặt 32 làm mặc định;
+    trở thành action từ T3.1. Lỗi cũ: 2048 (nhầm với khóa Paillier)'
+block_cipher_cycles_per_bit:
+  value: 90
+  unit: cycles/bit
+  source: '[B] Table I'
+  note: q^en — mã khối, CHỈ dùng cho nhánh AUX (V2V), nhân (1 + kappa_N log2(N_i/8))
+block_cipher_round_factor:
+  value: 0.1
+  unit: '-'
+  source: Extension (not in [A]/[B])
+  note: 'kappa_N: chi phí mã khối tăng theo độ dài khóa (số vòng, vd AES-128/192/256
+    = 10/12/14)'
+attacker_density:
+  value: 0.0001
+  unit: vehicles/vehicle (ratio, not per m^2)
+  source: '[B] Table I'
+  note: 'rho = 1e-4 — TỈ LỆ attacker trên tổng số xe. Lỗi cũ hiểu nhầm thành mật độ
+    không gian (sai 50 lần). Ref [B] Eq(8): n^e_i = pi d_i^2 rho gamma, gamma = N_l/(3
+    v_max); d_i là bán kính vùng phát của NGƯỜI GỬI'
+leakage_price:
+  value: 1.0e-07
+  unit: cents/bit
+  source: Calibrated (scripts/calibrate_energy.py)
+  note: 'Giá rủi ro rò rỉ: C_sec = leakage_price x bit offload x (1 - S) ([B] Eq(7)).
+    Thay thưởng varpi_1 U (thiên lệch về offload).'
+energy_budget_max:
+  value: 0.4
+  unit: J
+  source: '[B] Table I'
+  note: E_max — ngân sách năng lượng mỗi task (ràng buộc C3 của [B]; dùng từ T1.2)
+price_energy_local:
+  value: 1.0
+  unit: cents/J
+  source: '[A] Section 6'
+  note: lambda^l = 1 cents/J — quy đổi năng lượng local thành tiền
+price_energy_mec:
+  value: 1.0
+  unit: cents/J
+  source: Assumption ([A] Eq(22) lambda^j, no value given)
+  note: lambda^j = lambda^l — năng lượng user ở nhánh MEC
+price_energy_av:
+  value: 0.8
+  unit: cents/J
+  source: '[A] Section 6'
+  note: lambda^n = 0.8 cents/J — năng lượng CỦA USER khi offload sang AUX ([A] Eq(20),(22));
+    không phải năng lượng tính toán của AV
+mec_base_price:
+  value: 1.0
+  unit: cents (normalized)
+  source: Extension (not in [A]/[B])
+  note: g_j0 — giá cơ sở MEC, [A] không cho giá trị số cụ thể
+aux_base_price:
+  value: 0.5
+  unit: cents (normalized)
+  source: Extension (not in [A]/[B])
+  note: g_n0 — giá cơ sở AUX
+mec_credibility:
+  value: 0.9
+  unit: '- [0,1]'
+  source: Extension (not in [A]/[B])
+  note: b_j — độ tin cậy MEC trong công thức giá [A] §3.5
+aux_credibility:
+  value: 0.8
+  unit: '- [0,1]'
+  source: Extension (not in [A]/[B])
+  note: b_n — độ tin cậy AUX
+cost_normalization_divisor:
+  value: 1000000000.0
+  unit: cycles
+  source: Extension (not in [A]/[B])
+  note: Hệ số chuẩn hóa workload sang giga-cycles trong công thức cost, để cost nằm
+    trong dải [0, C_max] (T0.7 bước 4)
+resource_multiplier_step:
+  value: 0.1
+  unit: '-'
+  source: Extension (not in [A]/[B])
+  note: lambda_res = 1 + 0.1·level — hệ số giá theo mức tài nguyên, không có trong
+    [A] (T0.7 bước 4)
+deadline_penalty:
+  value: 5.0
+  unit: cents/violation
+  source: Extension (not in [A]/[B])
+  note: 'lambda_p TẠM cho penalty_mode=fixed (T1.2 bước 4: hạ từ 100 xuống [2,10]);
+    bị thay hoàn toàn bởi Lagrangian multiplier học được (T1.3, penalty_mode=external)'
+energy_violation_penalty:
+  value: 5.0
+  unit: cents/J
+  source: Extension (not in [A]/[B])
+  note: Penalty cho max(0, E - E_max) khi penalty_mode=fixed; thay bởi lambda_E học
+    được (T1.3)
+dt:
+  value: 0.1
+  unit: s
+  source: Extension (not in [A]/[B])
+  note: Bước thời gian mô phỏng
+episode_length:
+  value: 1000
+  unit: steps
+  source: Extension (not in [A]/[B])
+  note: Số bước tối đa mỗi episode
+env:
+  name: Reproduce_Paper_Fig9
+  description: Scenario 10 users, 1 MEC, 3 AVs theo [A] Section 6 / Fig.3
+  num_users: ${num_users.value}
+  num_mec_servers: ${num_mec_servers.value}
+  num_auxiliary_vehicles: ${num_auxiliary_vehicles.value}
+  num_attack_vehicles: ${num_attack_vehicles.value}
+  sim_area_x: ${sim_area_x.value}
+  sim_area_y: ${sim_area_y.value}
+  task_arrival_rate: ${task_arrival_rate.value}
+  task_size_min: ${task_size_min.value}
+  task_size_max: ${task_size_max.value}
+  task_cycles_per_bit: ${task_cycles_per_bit.value}
+  task_deadline: ${task_deadline_app.value}
+  dt: ${dt.value}
+  episode_length: ${episode_length.value}
+  v2v_range: ${v2v_range.value}
+  mec_cpu_frequency: ${mec_cpu_frequency.value}
+  aux_cpu_frequency: ${aux_cpu_frequency.value}
+  user_cpu_frequency: ${user_cpu_frequency.value}
+  channel:
+    bandwidth_mec: ${bandwidth_mec.value}
+    bandwidth_v2v: ${bandwidth_v2v.value}
+    noise_power: ${noise_power.value}
+    channel_gain: ${channel_ref_gain.value}
+    ref_distance: ${channel_ref_distance.value}
+    path_loss_exp: ${path_loss_exponent.value}
+  mec_server:
+    count: ${num_mec_servers.value}
+    coverage_radius: ${mec_coverage_radius.value}
+    curb_distance: ${curb_distance.value}
+    cpu_frequency: ${mec_cpu_frequency.value}
+    base_price: ${mec_base_price.value}
+    credibility: ${mec_credibility.value}
+    price_energy_mec: ${price_energy_mec.value}
+    bandwidth_pool: ${mec_bandwidth_pool.value}
+  users:
+    count: ${num_users.value}
+    velocity_min: ${velocity_min.value}
+    velocity_max: ${velocity_max.value}
+    velocity_mean: ${velocity_mean.value}
+    velocity_std: ${velocity_std.value}
+    tx_power: ${tx_power.value}
+    idle_power: ${idle_power.value}
+    task_size_min: ${task_size_min.value}
+    task_size_max: ${task_size_max.value}
+    cycles_per_bit: ${task_cycles_per_bit.value}
+    max_delay: ${task_deadline_app.value}
+    price_energy_local: ${price_energy_local.value}
+  aux_vehicles:
+    count: ${num_auxiliary_vehicles.value}
+    cpu_frequency: ${aux_cpu_frequency.value}
+    base_price: ${aux_base_price.value}
+    credibility: ${aux_credibility.value}
+    price_energy_av: ${price_energy_av.value}
+    bandwidth_pool: ${aux_bandwidth_pool.value}
+  mobility:
+    type: linear
+  attack:
+    count: ${num_attack_vehicles.value}
+    model: realized
+    density: ${attacker_density.value}
+    lane_count: ${lane_count.value}
+    road_max_speed_mps: ${road_max_speed.value}
+    frame_length_bits: ${block_cipher_frame_length.value}
+    encryption_block_length_bits: ${block_cipher_block_length.value}
+    security_range_v2i: ${security_range_v2i.value}
+    security_range_v2v: ${security_range_v2v.value}
+  deadline:
+    floor: ${deadline_floor.value}
+  constraints:
+    energy_budget_max: ${energy_budget_max.value}
+    leakage_price: ${leakage_price.value}
+    penalty_mode: fixed
+    deadline_penalty: ${deadline_penalty.value}
+    energy_violation_penalty: ${energy_violation_penalty.value}
+  background:
+    users_enabled: true
+    alpha_l: 0.5
+    resource_level: 4
+    load_enabled: false
+agent:
+  name: DuelingDQN
+  algo: DDRP
+  hyperparameters:
+    use_4d_action: true
+    learning_rate: 0.001
+    gamma: 0.95
+    batch_size: 64
+    buffer_size: 100000
+    learning_starts: 2000
+    use_double_dqn: true
+    use_soft_update: false
+    tau: 0.005
+    epsilon_schedule: linear
+    exploration_fraction: 0.3
+    epsilon_start: 1.0
+    epsilon_end: 0.01
+    epsilon_decay: 0.995
+    hidden_size: 256
+    target_update_freq: 100
+    alpha_levels: 10
+    action_levels: 10
+security:
+  encryption:
+    enabled: true
+    scheme: paillier
+    security_level: 1.0
+    mode: simulation
+    homomorphic:
+      key_length_bits: ${homomorphic_key_length.value}
+      cycles_per_bit: ${homomorphic_cycles_per_bit.value}
+    block_cipher:
+      frame_length_bits: ${block_cipher_frame_length.value}
+      block_length_bits: ${block_cipher_block_length.value}
+      cycles_per_bit: ${block_cipher_cycles_per_bit.value}
+      round_factor: ${block_cipher_round_factor.value}
+general:
+  project_name: /content/drive/MyDrive/LabEdgeComputing/vec_paper1/runs/dueling_dqn/synthetic/seed0
+  random_seed: 0
+  device: cpu
+  verbose: true
+  num_episodes: 150
+  eval_interval: 25
+  eval_episodes: 3
+  log_interval: 5
+paths:
+  root_dir: .
+  data_raw: data/raw
+  data_processed: data/processed
+  checkpoints: data/checkpoints
+  logs: outputs

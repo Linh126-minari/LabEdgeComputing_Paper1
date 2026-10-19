@@ -1,0 +1,8 @@
+- agent=dueling_dqn
+- env=scenario_default
+- general.random_seed=2
+- general.num_episodes=150
+- general.device=cpu
+- general.eval_interval=25
+- general.eval_episodes=3
+- general.project_name=/content/drive/MyDrive/LabEdgeComputing/vec_paper1/runs/dueling_dqn/synthetic/seed2

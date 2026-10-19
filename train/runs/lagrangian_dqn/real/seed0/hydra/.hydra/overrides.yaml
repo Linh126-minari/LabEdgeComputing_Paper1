@@ -1,0 +1,9 @@
+- agent=lagrangian_dqn
+- env=scenario_riobus
+- env.mobility.trace_file=data/processed/riobus/riobus_train.parquet
+- general.random_seed=0
+- general.num_episodes=150
+- general.device=cpu
+- general.eval_interval=25
+- general.eval_episodes=3
+- general.project_name=/content/drive/MyDrive/LabEdgeComputing/vec_paper1/runs/lagrangian_dqn/real/seed0
