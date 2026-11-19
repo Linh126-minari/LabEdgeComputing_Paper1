@@ -393,8 +393,29 @@ energy_violation_penalty:
   note: "Penalty cho max(0, E - E_max) khi penalty_mode=fixed; thay bởi lambda_E học được (T1.3)"
 
 # ---------------------------------------------------------------------------
-# 9. Simulation
+# 10. Edge Vehicle Density (Phase 1 — [P3] Chen et al., TMC 2025)
 # ---------------------------------------------------------------------------
+edge_density_radius:
+  value: 500.0
+  unit: "m"
+  source: "[P3] Table II"
+  note: "Bán kính D xác định các phương tiện xung quanh trạm Edge Server để tính mật độ rho_ej (TMC 2025 Sec IV-B)"
+
+edge_capacity:
+  value: 10
+  unit: "vehicles"
+  source: "[P3] Sec IV-B"
+  note: "Năng lực / sức chứa chuẩn hóa n_ej của mỗi trạm Edge Server"
+
+# ---------------------------------------------------------------------------
+# 11. Erlang-C Multi-core Queueing Model (Phase 3 — [P3] Chen et al., TMC 2025)
+# ---------------------------------------------------------------------------
+mec_num_cores:
+  value: 4
+  unit: "cores"
+  source: "[P3] Sec III-C"
+  note: "Số lõi tính toán song song n_ej của MEC server trong mô hình hàng đợi M/M/n Erlang-C"
+
 dt:
   value: 0.1
   unit: "s"

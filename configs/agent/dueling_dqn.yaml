@@ -34,3 +34,7 @@ hyperparameters:
   # Discretization (Rời rạc hóa hành động liên tục beta)
   alpha_levels: 10      # Mức rời rạc cho alpha_l, alpha_j, alpha_n
   action_levels: 10      # Chia tài nguyên thành 10 mức {0.1, ..., 1.0}
+
+  # Inference early stopping ([P3] TMC 2025 Sec IV-C)
+  early_stop_threshold: 0.03
+  early_stop_patience: 20

@@ -44,9 +44,30 @@ DRIVE = '/content/drive/MyDrive/vec_paper1'
 ```
 
 ```python
-# (3) Kiểm tra nhanh (~20 s) — phải thấy "101 passed"
-!python -m pytest tests/ -q 2>&1 | tail -3
+# (3) Kiểm tra nhanh toàn bộ unit tests (~20 s) — bao gồm 5 Phase mới của AF-CDRL
+!python -m pytest tests/test_async_federated.py tests/test_federated.py tests/test_queueing.py tests/test_early_stop.py tests/test_edge_density.py tests/test_params_master.py -q
 ```
+
+## 2.1. Huấn luyện Mô hình Đề xuất Mới AF-CDRL (Asynchronous Federated Safe DRL)
+
+Tập trung vào tối ưu hóa phân tán và học tăng cường an toàn (theo 3 bài báo IoT-J 2024, TVT 2025, TMC 2025):
+
+```python
+# (3.1) Huấn luyện AF-CDRL Bất đồng bộ (Đề xuất: Staleness Weighting + Erlang-C + Edge Density)
+FED_RUNS = f'{DRIVE}/runs_federated'
+!python train.py federated.enabled=true federated.async_enabled=true \
+    general.num_episodes=150 federated.num_agents=5 federated.aggregation_interval=10 \
+    hydra.run.dir={FED_RUNS}/af_cdrl_proposed
+```
+
+```python
+# (3.2) Huấn luyện FedAvg Đồng bộ (Baseline Liên kết để so sánh)
+!python train.py federated.enabled=true federated.async_enabled=false \
+    general.num_episodes=150 federated.num_agents=5 federated.aggregation_interval=10 \
+    hydra.run.dir={FED_RUNS}/fedavg_sync
+```
+
+## 2.2. Huấn luyện Lưới Thực nghiệm Baseline Cục bộ (PID-Lagrangian vs DuelingDQN)
 
 ```python
 # (4) Chạy thử 1 seed để kiểm tra hội tụ (xem ước lượng trước bằng --dry-run)

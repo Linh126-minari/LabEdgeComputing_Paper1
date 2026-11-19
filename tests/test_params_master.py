@@ -84,6 +84,9 @@ CODE_MAPPING = {
     "energy_violation_penalty": "energy_violation_penalty",
     "dt": "dt",
     "episode_length": "episode_length",
+    "edge_density_radius": "edge_density_radius",
+    "edge_capacity": "edge_capacity",
+    "mec_num_cores": "mec_num_cores",
 }
 
 

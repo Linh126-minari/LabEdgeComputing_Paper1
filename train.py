@@ -22,6 +22,8 @@ from omegaconf import DictConfig, OmegaConf
 import numpy as np
 from pathlib import Path
 import json
+import copy
+import torch
 
 from src.env.core import VehicularEdgeEnvironment, EnvironmentConfig
 from src.agents.policy import DRLAgent
@@ -30,6 +32,18 @@ from src.agents.maddpg import MADDPGAgent
 from src.env.multi_agent import MultiAgentVehicularEdgeEnv
 from src.utils.logger import Logger
 
+
+# Khắc phục tính tương thích giữa Python 3.14 argparse và Hydra 1.3 LazyCompletionHelp
+try:
+    import argparse
+    _orig_expand_help = argparse.HelpFormatter._expand_help
+    def _patched_expand_help(self, action):
+        if hasattr(action, "help") and action.help is not None and not isinstance(action.help, str):
+            action.help = str(action.help)
+        return _orig_expand_help(self, action)
+    argparse.HelpFormatter._expand_help = _patched_expand_help
+except Exception:
+    pass
 
 logger = Logger("TrainingScript")
 
@@ -127,6 +141,11 @@ def create_env_config(cfg: DictConfig) -> EnvironmentConfig:
         action_levels=hp.get("action_levels", D.action_levels),
         dt=g("dt", "dt"),
         episode_length=g("episode_length", "episode_length"),
+        edge_density_in_state=g("edge_density.enabled", "edge_density_in_state"),
+        edge_density_radius=g("edge_density.radius", "edge_density_radius"),
+        edge_capacity=g("edge_density.capacity", "edge_capacity"),
+        queueing_model_enabled=g("queueing.enabled", "queueing_model_enabled"),
+        mec_num_cores=g("queueing.mec_num_cores", "mec_num_cores"),
     )
 
 
@@ -224,10 +243,10 @@ def train(cfg: DictConfig):
     # T0.10: assert nhất quán state/action dim với công thức trong bài
     J = env_config.num_mec_servers
     N = env_config.num_auxiliary_vehicles
-    expected_state_dim = 5 + 2 * (J + N)
+    expected_state_dim = 5 + 2 * (J + N) + (J if env_config.edge_density_in_state else 0)
     assert env.observation_space.shape[0] == expected_state_dim, (
         f"State dim không khớp công thức trong bài: "
-        f"{env.observation_space.shape[0]} != 5 + 2({J}+{N}) = {expected_state_dim}"
+        f"{env.observation_space.shape[0]} != {expected_state_dim}"
     )
     expected_action_dims = 4 if env_config.use_4d_action else 3
     assert len(env.action_space.nvec) == expected_action_dims, (
@@ -293,7 +312,13 @@ def train(cfg: DictConfig):
             eval_violations = []
             
             for _ in range(cfg.general.get("eval_episodes", 5)):
-                eval_stats = agent.evaluate_episode(train_env, max_steps=env_config.episode_length)
+                eval_hp = cfg.agent.get("hyperparameters", {})
+                eval_stats = agent.evaluate_episode(
+                    train_env,
+                    max_steps=env_config.episode_length,
+                    early_stop_threshold=eval_hp.get("early_stop_threshold", 0.0),
+                    early_stop_patience=eval_hp.get("early_stop_patience", 20),
+                )
                 eval_rewards.append(eval_stats.get("episode_reward", 0.0))
                 eval_delays.append(eval_stats.get("avg_delay", 0.0))
                 eval_violations.append(eval_stats.get("deadline_violation_rate", 0.0))
@@ -354,6 +379,182 @@ def train(cfg: DictConfig):
     return agent, training_history, eval_history
 
 
+def train_federated(cfg: DictConfig):
+    """
+    Federated training loop (Phase 4 — [P3] TMC 2025):
+    N agents (mỗi agent đại diện cho 1 xe buýt), mỗi agent sở hữu 1 môi trường riêng.
+    Cứ sau K episodes, mô hình được tổng hợp theo FedAvg (McMahan et al., 2017)
+    với trọng số tỷ lệ thuận theo số lượng mẫu trong Replay Buffer.
+    """
+    from src.algorithms.federated import FedAvgAggregator, AsyncFedAggregator
+
+    logger.info("=" * 80)
+    logger.info("Starting FEDERATED TRAINING for Vehicular Edge Computing Agents")
+    logger.info("=" * 80)
+
+    proj = Path(cfg.general.project_name)
+    output_dir = proj if proj.is_absolute() else Path(cfg.paths.logs) / proj
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    base_seed = cfg.general.random_seed
+    np.random.seed(base_seed)
+    __import__("torch").manual_seed(base_seed)
+
+    env_config = create_env_config(cfg)
+    fed_cfg = cfg.get("federated", {})
+    num_agents = int(fed_cfg.get("num_agents", 5))
+    agg_interval = int(fed_cfg.get("aggregation_interval", 10))
+    min_participants = int(fed_cfg.get("min_participants", 2))
+    async_enabled = bool(fed_cfg.get("async_enabled", True))
+    staleness_alpha = float(fed_cfg.get("staleness_alpha", 0.5))
+
+    logger.info(
+        f"Initializing {num_agents} Federated Agents (mode={'Async' if async_enabled else 'Sync FedAvg'}, "
+        f"aggregation every {agg_interval} episodes)..."
+    )
+
+    # Tạo N cặp (env, agent)
+    envs, agents = [], []
+    for i in range(num_agents):
+        cfg_i = copy.deepcopy(cfg)
+        cfg_i.general.random_seed = base_seed + (i * 100)
+        env_i = VehicularEdgeEnvironment(env_config)
+        agent_i, _ = build_agent(cfg_i, env_i, env_config)
+        envs.append(env_i)
+        agents.append(agent_i)
+
+    # Khởi tạo Aggregator (AsyncFedAggregator hoặc FedAvgAggregator)
+    if async_enabled:
+        aggregator = AsyncFedAggregator(
+            global_model=agents[0].q_network,
+            aggregation_interval=agg_interval,
+            min_participants=min_participants,
+            staleness_alpha=staleness_alpha,
+        )
+    else:
+        aggregator = FedAvgAggregator(
+            global_model=agents[0].q_network,
+            aggregation_interval=agg_interval,
+            min_participants=min_participants,
+        )
+    # Broadcast mô hình khởi tạo chung
+    aggregator.broadcast(agents)
+
+    num_episodes = cfg.general.get("num_episodes", 100)
+    eval_interval = cfg.general.get("eval_interval", 10)
+    log_interval = cfg.general.get("log_interval", 5)
+
+    training_history = []
+    eval_history = []
+
+    for episode in range(1, num_episodes + 1):
+        # 1. Các agent huấn luyện cục bộ 1 episode
+        ep_stats_list = []
+        for i in range(num_agents):
+            stats_i = agents[i].train_episode(envs[i], max_steps=env_config.episode_length)
+            ep_stats_list.append(stats_i)
+
+        avg_reward = float(np.mean([s["total_reward"] for s in ep_stats_list]))
+        avg_loss = float(np.mean([s["avg_loss"] for s in ep_stats_list]))
+        avg_viol_T = float(np.mean([s["viol_rate_T"] for s in ep_stats_list]))
+        avg_viol_E = float(np.mean([s["avg_viol_E"] for s in ep_stats_list]))
+
+        training_history.append({
+            "episode": episode,
+            "avg_reward": avg_reward,
+            "avg_loss": avg_loss,
+            "avg_viol_T": avg_viol_T,
+            "avg_viol_E": avg_viol_E,
+            "per_agent": ep_stats_list,
+        })
+
+        # 2. Định kỳ tổng hợp Federated (Async hoặc Sync)
+        if aggregator.should_aggregate(episode):
+            if async_enabled and isinstance(aggregator, AsyncFedAggregator):
+                # Cơ chế Async: Chỉ các xe buýt đang nằm trong vùng phủ sóng MEC mới gửi mô hình lên RSU
+                participating_indices = []
+                for idx, env_i in enumerate(envs):
+                    user_entity = env_i.users[0]
+                    mec_server = env_i.mec_servers[0] if env_i.mec_servers else None
+                    if mec_server and mec_server.is_covered(user_entity):
+                        participating_indices.append(idx)
+
+                # Nếu số xe trong vùng đạt min_participants thì tiến hành async aggregate
+                if len(participating_indices) >= aggregator.min_participants:
+                    participating_models = [agents[idx].q_network for idx in participating_indices]
+                    participating_sizes = [len(agents[idx].replay_buffer) for idx in participating_indices]
+                    aggregator.async_aggregate(
+                        participating_agent_ids=participating_indices,
+                        agent_models=participating_models,
+                        data_sizes=participating_sizes,
+                    )
+                    # Broadcast cập nhật mô hình cho các xe đang kết nối
+                    for idx in participating_indices:
+                        agents[idx].q_network.load_state_dict(copy.deepcopy(aggregator.global_state_dict))
+                        agents[idx].target_network.load_state_dict(copy.deepcopy(aggregator.global_state_dict))
+                else:
+                    logger.info(
+                        f"[AsyncFed] Ep {episode:4d}: Chỉ có {len(participating_indices)} xe trong vùng phủ MEC (< {aggregator.min_participants}). Bỏ qua round này."
+                    )
+            else:
+                # Chế độ FedAvg đồng bộ (toàn bộ xe đều tham gia)
+                buffer_sizes = [len(a.replay_buffer) for a in agents]
+                aggregator.aggregate([a.q_network for a in agents], weights=buffer_sizes)
+                # Phát tán mô hình hợp nhất tới toàn bộ xe
+                aggregator.broadcast(agents)
+
+        if episode % log_interval == 0:
+            logger.info(
+                f"[Fed] Ep {episode:4d} | Avg Reward: {avg_reward:10.4f} | "
+                f"Avg Loss: {avg_loss:8.6f} | Avg Viol_T: {avg_viol_T:.3f} | "
+                f"Fed Rounds: {aggregator.round_count}"
+            )
+
+        # 3. Đánh giá định kỳ
+        if episode % eval_interval == 0:
+            eval_rewards, eval_delays, eval_violations = [], [], []
+            eval_hp = cfg.agent.get("hyperparameters", {})
+            for a_idx in range(num_agents):
+                eval_stats = agents[a_idx].evaluate_episode(
+                    envs[a_idx],
+                    max_steps=env_config.episode_length,
+                    early_stop_threshold=eval_hp.get("early_stop_threshold", 0.0),
+                    early_stop_patience=eval_hp.get("early_stop_patience", 20),
+                )
+                eval_rewards.append(eval_stats.get("episode_reward", 0.0))
+                eval_delays.append(eval_stats.get("avg_delay", 0.0))
+                eval_violations.append(eval_stats.get("deadline_violation_rate", 0.0))
+
+            eval_res = {
+                "episode": episode,
+                "avg_reward": float(np.mean(eval_rewards)),
+                "avg_delay": float(np.mean(eval_delays)),
+                "deadline_violation_rate": float(np.mean(eval_violations)),
+                "fed_round": aggregator.round_count,
+            }
+            eval_history.append(eval_res)
+            logger.info(
+                f"[Fed Eval] Ep {episode:4d} | Reward={eval_res['avg_reward']:.4f}, "
+                f"Delay={eval_res['avg_delay']:.4f}s, Viol={eval_res['deadline_violation_rate']:.2%}"
+            )
+
+    # Lưu kết quả
+    model_path = output_dir / "fed_global_model.pth"
+    torch.save(aggregator.global_state_dict, model_path)
+    logger.info(f"Global model saved to {model_path}")
+
+    with open(output_dir / "fed_training_history.json", "w", encoding="utf-8") as f:
+        json.dump({"training": training_history, "evaluation": eval_history, "fed_rounds": aggregator.history}, f, indent=2)
+
+    with open(output_dir / "config.yaml", "w", encoding="utf-8") as f:
+        f.write(OmegaConf.to_yaml(cfg))
+
+    logger.info("=" * 80)
+    logger.info("Federated Training completed successfully!")
+    logger.info("=" * 80)
+    return agents, training_history, eval_history
+
+
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 def main(cfg: DictConfig):
     """
@@ -362,7 +563,10 @@ def main(cfg: DictConfig):
     Args:
         cfg: Hydra DictConfig
     """
-    train(cfg)
+    if cfg.get("federated", {}).get("enabled", False):
+        train_federated(cfg)
+    else:
+        train(cfg)
 
 
 if __name__ == "__main__":

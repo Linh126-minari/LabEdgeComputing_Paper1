@@ -182,6 +182,16 @@ class EnvironmentConfig:
     episode_length: int = 1000  # số QUYẾT ĐỊNH tối đa mỗi episode (không đếm chờ)
     max_wait_iterations: int = 100000  # chốt an toàn chống treo khi λ quá nhỏ
 
+    # Edge Vehicle Density ([P3] TMC 2025 Sec IV-B)
+    edge_density_in_state: bool = False  # Mặc định False để tương thích ngược hoàn toàn; bật True để đưa rho_ej vào State
+    edge_density_radius: float = 500.0   # Bán kính D = 500m quanh MEC server
+    edge_capacity: int = 10              # Năng lực / sức chứa chuẩn hóa n_ej của MEC server
+
+    # Erlang-C Multi-core Queueing Model ([P3] TMC 2025 Sec III-C)
+    queueing_model_enabled: bool = False  # Mặc định False để giữ trễ C/f đơn giản ban đầu; True để kích hoạt hàng đợi Erlang-C M/M/n
+    mec_num_cores: int = 4                # Số lõi tính toán song song n_ej của MEC server
+
+
 
 class VehicularEdgeEnvironment(gym.Env):
     """
@@ -450,10 +460,14 @@ class VehicularEdgeEnvironment(gym.Env):
         """
         dim = 5 + 2·(J + N): task (3) + distances (J+N) + utilization (J+N) + rate (1)
         + số attacker nᵉ trong tầm phát V2V (1) — [B] giả định người gửi biết nᵉ để chọn N_i (Eq 39).
+        Nếu edge_density_in_state=True: thêm J chiều mật độ phương tiện rho_ej quanh mỗi MEC ([P3] TMC 2025).
         """
         j = self.config.num_mec_servers
         n = self.config.num_auxiliary_vehicles
-        return 5 + 2 * (j + n)
+        base_dim = 5 + 2 * (j + n)
+        if getattr(self.config, "edge_density_in_state", False):
+            base_dim += j
+        return base_dim
 
     # ==================== T1.1 — Residence time / deadline động ====================
 
@@ -965,6 +979,24 @@ class VehicularEdgeEnvironment(gym.Env):
         tx_time = tx_bits / max(rate, 1.0)
         exe_time = (sub.cycles_per_bit * sub.size + dec_cycles) / cpu_freq
         delay = tx_time + exe_time
+
+        # [P3] TMC 2025 Sec III-C: Erlang-C Multi-core Queueing Delay Model for MEC
+        if getattr(cfg, "queueing_model_enabled", False) and kind == "mec":
+            from src.env.queueing import mm_n_queue_delay
+            recent_window = 5.0  # Quan sát số lượng tác vụ trong cửa sổ 5s gần nhất
+            recent_tasks = sum(
+                1 for h in self.background_history
+                if self.current_time - h.get("timestamp", 0.0) < recent_window
+            )
+            arrival_rate = float(recent_tasks + 1) / recent_window  # tasks/s (kèm task hiện tại)
+            # Tốc độ xử lý của mỗi core = (tần số cấp phát / n_cores) / số chu kỳ của subtask
+            n_cores = max(1, getattr(cfg, "mec_num_cores", 4))
+            total_workload = sub.cycles_per_bit * sub.size + dec_cycles
+            service_rate_per_core = (cpu_freq / n_cores) / max(total_workload, 1.0)
+            q_delay = mm_n_queue_delay(n_cores, arrival_rate, service_rate_per_core)
+            # Tránh inf làm nổ float/gradient
+            delay += min(q_delay, tau_eff)
+
         price = (self._compute_mec_cost(node, sub, resource_level, tau_eff) if kind == "mec"
                  else self._compute_aux_cost(node, sub, resource_level, tau_eff))
 
@@ -1266,10 +1298,33 @@ class VehicularEdgeEnvironment(gym.Env):
             state_vector.append(0.0)
         state_vector.append(min(self.attackers_in_range(user, self.config.security_range_v2v) / 3.0, 1.0))
 
+        # [P3] TMC 2025 Sec IV-B: Edge Vehicle Density rho_ej = m_ej / n_ej
+        if getattr(self.config, "edge_density_in_state", False):
+            state_vector.extend(self._compute_edge_density())
+
         assert len(state_vector) == self.observation_space.shape[0], (
-            f"State dim không khớp công thức 5 + 2(J+N): "
+            f"State dim không khớp công thức: "
             f"{len(state_vector)} != {self.observation_space.shape[0]}")
         return np.array(state_vector, dtype=np.float32)
+
+    def _compute_edge_density(self) -> List[float]:
+        """
+        [P3] TMC 2025 Sec IV-B: Tính mật độ xe rho_ej = m_ej / n_ej quanh mỗi MEC server.
+        m_ej là số lượng users trong bán kính edge_density_radius (mặc định 500m).
+        n_ej là sức chứa / capacity chuẩn hóa của trạm edge.
+        Giá trị được clip trong [0, 1].
+        """
+        densities = []
+        radius = getattr(self.config, "edge_density_radius", 500.0)
+        capacity = max(1, getattr(self.config, "edge_capacity", 10))
+        for mec in self.mec_servers:
+            count = sum(
+                1 for u in self.users
+                if self._is_present(u) and u.get_distance(mec) <= radius
+            )
+            rho = count / float(capacity)
+            densities.append(float(np.clip(rho, 0.0, 1.0)))
+        return densities
 
     # ==================== Vehicle & Task Management ====================
 

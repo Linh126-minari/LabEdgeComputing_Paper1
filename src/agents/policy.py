@@ -372,14 +372,24 @@ class DRLAgent:
         self._on_episode_end(stats)  # T1.3 hook
         return stats
 
-    def evaluate_episode(self, env, max_steps: int = 1000) -> dict:
+    def evaluate_episode(self, env, max_steps: int = 1000,
+                         early_stop_threshold: float = 0.0,
+                         early_stop_patience: int = 20) -> dict:
         """
         Evaluate agent performance for one episode (no training, no exploration).
+        
+        Args:
+            env: Gym environment.
+            max_steps: Maximum steps per episode.
+            early_stop_threshold: τ_stop [P3] §IV-C (0 = disabled).
+            early_stop_patience: Number of consecutive steps with ||Δa|| <= threshold to trigger stop.
         """
         state, info = env.reset()
         mask = info.get("action_mask")
         episode_reward = 0.0
         step = 0
+        prev_action = None
+        stable_count = 0
 
         for step in range(max_steps):
             action = self.select_action(state, training=False, mask=mask)
@@ -387,13 +397,26 @@ class DRLAgent:
             episode_reward += reward
             state = next_state
             mask = info.get("action_mask")
+
+            # [P3] TMC 2025 Sec IV-C: Early stopping check
+            if early_stop_threshold > 0.0 and prev_action is not None:
+                delta = float(np.linalg.norm(action.astype(float) - prev_action.astype(float)))
+                if delta <= early_stop_threshold:
+                    stable_count += 1
+                else:
+                    stable_count = 0
+                if stable_count >= early_stop_patience:
+                    break
+            prev_action = action.copy()
+
             if terminated or truncated:
                 break
 
         metrics = env.get_metrics()
         metrics.update({
             "episode_reward": episode_reward,
-            "steps": step + 1
+            "steps": step + 1,
+            "early_stopped": bool(early_stop_threshold > 0.0 and stable_count >= early_stop_patience),
         })
         return metrics
     

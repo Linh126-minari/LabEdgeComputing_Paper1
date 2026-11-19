@@ -31,3 +31,13 @@ paths:
   data_processed: "data/processed"
   checkpoints: "data/checkpoints"
   logs: "outputs"
+
+# Federated Learning Configuration (Phase 4 & Phase 5 — [P3] TMC 2025 + [P1] IoT-J 2024)
+federated:
+  enabled: false              # true = Federated multi-agent mode, false = Single-agent (baseline)
+  num_agents: 5               # Số lượng xe buýt tham gia huấn luyện phân tán
+  aggregation_interval: 10    # Chu kỳ K episodes giữa 2 lần tổng hợp FedAvg ([P3] Sec IV-D)
+  min_participants: 2         # Số lượng xe tối thiểu tham gia mỗi vòng tổng hợp
+  async_enabled: true         # Phase 5: Bật Asynchronous Staleness Weighting ([P1] IoT-J 2024)
+  staleness_alpha: 0.5        # Hệ số phạt suy giảm hàm mũ alpha ([P1] Sec V-C)
+
